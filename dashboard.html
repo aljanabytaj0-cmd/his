@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة التحكم — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-card .stat-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: var(--color-bg-alt);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px;
+    margin-bottom: 4px;
+  }
+  .stat-card .stat-value { font-family: var(--font-display); font-size: 26px; font-weight: 800; color: var(--color-primary-dark); }
+  .stat-card .stat-label { font-size: 13px; color: var(--color-text-muted); font-weight: 600; }
+
+  .welcome-banner {
+    padding: 26px 28px;
+    margin-bottom: 24px;
+    background: var(--color-primary-dark);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    overflow: hidden;
+    position: relative;
+  }
+  .welcome-banner::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 90% 20%, rgba(201,148,42,0.25), transparent 55%);
+  }
+  .welcome-banner h2 { color: #fff; font-size: 19px; position: relative; }
+  .welcome-banner p { margin: 6px 0 0; font-size: 13.5px; color: rgba(255,255,255,0.65); position: relative; }
+
+  .modules-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 16px;
+  }
+  .module-card {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: box-shadow 0.15s, transform 0.15s;
+  }
+  .module-card:not(.locked):hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+  .module-card .m-icon { font-size: 22px; }
+  .module-card .m-title { font-weight: 700; font-size: 14.5px; color: var(--color-text); }
+  .module-card .m-status { font-size: 11.5px; }
+  .module-card.locked { opacity: 0.55; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 id="page-title" class="font-display">الرئيسية</h2>
+      <div id="topbar-date" style="font-size:13px;color:var(--color-text-muted);"></div>
+    </header>
+
+    <main class="page-body">
+      <div class="welcome-banner card">
+        <div>
+          <h2 id="welcome-text">أهلاً بك 👋</h2>
+          <p>هذه لمحة سريعة عن حالة المستشفى اليوم</p>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card card">
+          <div class="stat-icon">🩺</div>
+          <div class="stat-value" id="stat-patients">—</div>
+          <div class="stat-label">إجمالي المرضى المسجّلين</div>
+        </div>
+        <div class="stat-card card">
+          <div class="stat-icon">🆕</div>
+          <div class="stat-value" id="stat-patients-today">—</div>
+          <div class="stat-label">مرضى جدد اليوم</div>
+        </div>
+        <div class="stat-card card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-value" id="stat-employees">—</div>
+          <div class="stat-label">عدد الموظفين</div>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom:14px;font-size:15px;">الوحدات</h3>
+      <div class="modules-grid" id="modules-grid"></div>
+    </main>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { db } from "./assets/js/firebase-config.js";
+  import { collection, getCountFromServer, query, where, Timestamp }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const MODULE_CARDS = [
+    { key: "patients", icon: "🩺", title: "المرضى والملفات الطبية", href: "patients.html", ready: true },
+    { key: "appointments", icon: "📅", title: "المواعيد والحجوزات", href: "#", ready: false },
+    { key: "emergency", icon: "🛏", title: "الطوارئ والأسرّة", href: "#", ready: false },
+    { key: "pharmacy", icon: "💊", title: "الصيدلية والمخزون", href: "#", ready: false },
+    { key: "lab", icon: "🧪", title: "المختبر والأشعة", href: "#", ready: false },
+    { key: "billing", icon: "💳", title: "الفوترة والحسابات", href: "#", ready: false },
+    { key: "hr", icon: "👥", title: "الموارد البشرية", href: "#", ready: false },
+    { key: "reports", icon: "📊", title: "التقارير الشهرية", href: "#", ready: false },
+  ];
+
+  requireAuth(async ({ profile }) => {
+    renderSidebar("dashboard", profile);
+    document.getElementById("welcome-text").textContent = `أهلاً بك، ${profile.name || ""} 👋`;
+    document.getElementById("topbar-date").textContent = new Date().toLocaleDateString("ar-IQ", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric"
+    });
+
+    // بناء بطاقات الوحدات
+    const grid = document.getElementById("modules-grid");
+    grid.innerHTML = MODULE_CARDS.map(m => {
+      const locked = !m.ready;
+      return `
+        <a class="card module-card ${locked ? "locked" : ""}" href="${locked ? "#" : m.href}">
+          <div class="m-icon">${m.icon}</div>
+          <div class="m-title">${m.title}</div>
+          <span class="badge ${locked ? "badge-neutral" : "badge-success"} m-status">
+            ${locked ? "قيد التطوير" : "متاح الآن"}
+          </span>
+        </a>`;
+    }).join("");
+
+    // إحصائيات حية من Firestore
+    try {
+      const patientsCol = collection(db, "patients");
+      const totalSnap = await getCountFromServer(patientsCol);
+      document.getElementById("stat-patients").textContent = totalSnap.data().count;
+
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const todayQuery = query(patientsCol, where("createdAt", ">=", Timestamp.fromDate(startOfDay)));
+      const todaySnap = await getCountFromServer(todayQuery);
+      document.getElementById("stat-patients-today").textContent = todaySnap.data().count;
+
+      const employeesSnap = await getCountFromServer(collection(db, "employees"));
+      document.getElementById("stat-employees").textContent = employeesSnap.data().count;
+    } catch (err) {
+      console.error("تعذر تحميل الإحصائيات:", err);
+    }
+  });
+</script>
+</body>
+</html>

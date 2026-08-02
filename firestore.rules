@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // دالة مساعدة: هل المستخدم مسجّل دخول وله ملف موظف فعّال؟
+    function isActiveEmployee() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.active == true;
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.role;
+    }
+
+    // ملفات الموظفين: كل موظف يقرأ ملفه، والأدمن يدير الكل
+    match /employees/{empId} {
+      allow read: if isActiveEmployee();
+      allow write: if isActiveEmployee() && myRole() == 'admin';
+    }
+
+    // المرضى وسجل الزيارات: أي موظف فعّال يقرأ/يكتب (يمكن تشديدها لاحقاً حسب الدور)
+    match /patients/{patientId} {
+      allow read, write: if isActiveEmployee();
+
+      match /visits/{visitId} {
+        allow read, write: if isActiveEmployee();
+      }
+    }
+
+    // أي مجموعة أخرى تُبنى لاحقاً (مواعيد، صيدلية...) تتبع نفس المبدأ افتراضياً
+    match /{document=**} {
+      allow read, write: if false; // منع افتراضي — يُفتح صراحة لكل وحدة جديدة
+    }
+  }
+}

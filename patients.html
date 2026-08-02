@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>المرضى والملفات الطبية — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .toolbar .search-box { flex: 1; min-width: 220px; position: relative; }
+  .toolbar .search-box input { padding-right: 38px; }
+  .toolbar .search-box .icon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--color-text-faint); }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: right;
+    font-size: 12.5px;
+    color: var(--color-text-muted);
+    font-weight: 700;
+    padding: 12px 16px;
+    border-bottom: 1.5px solid var(--color-border);
+  }
+  tbody td {
+    padding: 13px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  tbody tr:hover { background: var(--color-bg-alt); cursor: pointer; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pid { font-family: monospace; font-size: 12px; color: var(--color-text-faint); }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--color-text-muted); }
+  .empty-state .e-icon { font-size: 40px; margin-bottom: 10px; }
+
+  /* نافذة منبثقة */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(15,25,24,0.45);
+    z-index: 100;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    width: 100%; max-width: 640px;
+    padding: 28px 30px;
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-close { font-size: 20px; color: var(--color-text-faint); background: none; border: none; padding: 4px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-start; margin-top: 6px; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--color-border); margin-bottom: 18px; }
+  .tab-btn { padding: 10px 16px; font-size: 13.5px; font-weight: 700; color: var(--color-text-muted); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1.5px; }
+  .tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .patient-meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+
+  .visit-item { padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin-bottom: 10px; }
+  .visit-item .v-top { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--color-text-muted); margin-bottom: 6px; }
+  .visit-item .v-diagnosis { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+  .visit-item .v-notes { font-size: 13px; color: var(--color-text-muted); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">المرضى والملفات الطبية</h2>
+      <button class="btn btn-primary" id="btn-add-patient">+ تسجيل مريض جديد</button>
+    </header>
+
+    <main class="page-body">
+      <div class="toolbar">
+        <div class="search-box">
+          <input type="text" class="input-field" id="search-input" placeholder="ابحث بالاسم أو رقم الهاتف أو الرقم الوطني...">
+          <span class="icon">🔎</span>
+        </div>
+      </div>
+
+      <div class="card" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم الكامل</th>
+              <th>الجنس</th>
+              <th>العمر</th>
+              <th>الهاتف</th>
+              <th>فصيلة الدم</th>
+              <th>تاريخ التسجيل</th>
+            </tr>
+          </thead>
+          <tbody id="patients-tbody">
+            <tr><td colspan="6"><div class="empty-state">جارِ التحميل...</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- نافذة إضافة مريض -->
+<div class="modal-overlay" id="add-modal">
+  <div class="card modal-box">
+    <div class="modal-header">
+      <h3 class="font-display">تسجيل مريض جديد</h3>
+      <button class="modal-close" data-close="add-modal">✕</button>
+    </div>
+    <form id="add-patient-form">
+      <div class="form-grid">
+        <div class="full">
+          <label class="field-label">الاسم الكامل *</label>
+          <input type="text" class="input-field" id="f-name" required>
+        </div>
+        <div>
+          <label class="field-label">الرقم الوطني</label>
+          <input type="text" class="input-field" id="f-nid">
+        </div>
+        <div>
+          <label class="field-label">رقم الهاتف</label>
+          <input type="tel" class="input-field" id="f-phone">
+        </div>
+        <div>
+          <label class="field-label">الجنس</label>
+          <select class="input-field" id="f-gender">
+            <option value="ذكر">ذكر</option>
+            <option value="أنثى">أنثى</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">تاريخ الميلاد</label>
+          <input type="date" class="input-field" id="f-dob">
+        </div>
+        <div>
+          <label class="field-label">فصيلة الدم</label>
+          <select class="input-field" id="f-blood">
+            <option value="">غير معروف</option>
+            <option>A+</option><option>A-</option>
+            <option>B+</option><option>B-</option>
+            <option>AB+</option><option>AB-</option>
+            <option>O+</option><option>O-</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">الحساسية (إن وجدت)</label>
+          <input type="text" class="input-field" id="f-allergies" placeholder="مثال: بنسلين">
+        </div>
+        <div class="full">
+          <label class="field-label">العنوان</label>
+          <input type="text" class="input-field" id="f-address">
+        </div>
+        <div class="full">
+          <label class="field-label">أمراض مزمنة / ملاحظات عامة</label>
+          <textarea class="input-field" id="f-conditions" rows="2"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary" id="save-patient-btn">حفظ المريض</button>
+        <button type="button" class="btn btn-outline" data-close="add-modal">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- نافذة عرض ملف المريض -->
+<div class="modal-overlay" id="view-modal">
+  <div class="card modal-box" style="max-width:700px;">
+    <div class="modal-header">
+      <h3 class="font-display" id="view-patient-name">—</h3>
+      <button class="modal-close" data-close="view-modal">✕</button>
+    </div>
+
+    <div class="patient-meta-row" id="view-patient-meta"></div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab-info">البيانات الأساسية</button>
+      <button class="tab-btn" data-tab="tab-visits">سجل الزيارات</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-info"></div>
+
+    <div class="tab-panel" id="tab-visits">
+      <form id="add-visit-form" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <input type="text" class="input-field" id="v-diagnosis" placeholder="التشخيص / سبب الزيارة" style="flex:2; min-width:160px;" required>
+        <input type="text" class="input-field" id="v-department" placeholder="القسم (مثال: باطنية)" style="flex:1; min-width:120px;">
+        <button type="submit" class="btn btn-primary btn-sm">+ إضافة زيارة</button>
+      </form>
+      <div id="visits-list"><div class="empty-state">لا توجد زيارات بعد</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { db } from "./assets/js/firebase-config.js";
+  import {
+    collection, addDoc, getDocs, doc, query, orderBy,
+    serverTimestamp, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  let currentUser = null;
+  let allPatients = [];
+  let currentPatientId = null;
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  function calcAge(dobStr) {
+    if (!dobStr) return "—";
+    const dob = new Date(dobStr);
+    const diff = Date.now() - dob.getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return "—";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString("ar-IQ", { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function renderTable(list) {
+    const tbody = document.getElementById("patients-tbody");
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="e-icon">🩺</div>لا يوجد مرضى مسجّلون بعد</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = list.map(p => `
+      <tr data-id="${p.id}">
+        <td><strong>${p.name || "—"}</strong></td>
+        <td>${p.gender || "—"}</td>
+        <td>${calcAge(p.dob)}</td>
+        <td>${p.phone || "—"}</td>
+        <td>${p.bloodType ? `<span class="badge badge-neutral">${p.bloodType}</span>` : "—"}</td>
+        <td>${fmtDate(p.createdAt)}</td>
+      </tr>
+    `).join("");
+
+    tbody.querySelectorAll("tr[data-id]").forEach(row => {
+      row.addEventListener("click", () => openPatientView(row.dataset.id));
+    });
+  }
+
+  function applySearch() {
+    const q = document.getElementById("search-input").value.trim().toLowerCase();
+    if (!q) { renderTable(allPatients); return; }
+    const filtered = allPatients.filter(p =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.phone || "").includes(q) ||
+      (p.nationalId || "").includes(q)
+    );
+    renderTable(filtered);
+  }
+
+  document.getElementById("search-input").addEventListener("input", applySearch);
+
+  // فتح/إغلاق النوافذ المنبثقة
+  document.querySelectorAll("[data-close]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.getElementById(btn.dataset.close).classList.remove("show");
+    });
+  });
+  document.getElementById("btn-add-patient").addEventListener("click", () => {
+    document.getElementById("add-modal").classList.add("show");
+  });
+
+  // تبديل التبويبات
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  // إضافة مريض جديد
+  document.getElementById("add-patient-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("save-patient-btn");
+    btn.disabled = true;
+    btn.textContent = "جارِ الحفظ...";
+    try {
+      await addDoc(collection(db, "patients"), {
+        name: document.getElementById("f-name").value.trim(),
+        nationalId: document.getElementById("f-nid").value.trim(),
+        phone: document.getElementById("f-phone").value.trim(),
+        gender: document.getElementById("f-gender").value,
+        dob: document.getElementById("f-dob").value,
+        bloodType: document.getElementById("f-blood").value,
+        allergies: document.getElementById("f-allergies").value.trim(),
+        address: document.getElementById("f-address").value.trim(),
+        conditions: document.getElementById("f-conditions").value.trim(),
+        createdAt: serverTimestamp(),
+        createdBy: currentUser?.uid || null
+      });
+      document.getElementById("add-patient-form").reset();
+      document.getElementById("add-modal").classList.remove("show");
+      showToast("تم تسجيل المريض بنجاح ✓");
+    } catch (err) {
+      console.error(err);
+      showToast("حدث خطأ أثناء الحفظ", true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "حفظ المريض";
+    }
+  });
+
+  // عرض ملف مريض
+  function openPatientView(id) {
+    const p = allPatients.find(x => x.id === id);
+    if (!p) return;
+    currentPatientId = id;
+
+    document.getElementById("view-patient-name").textContent = p.name || "—";
+    document.getElementById("view-patient-meta").innerHTML = `
+      <span class="badge badge-neutral">${p.gender || "—"}</span>
+      <span class="badge badge-neutral">${calcAge(p.dob)} سنة</span>
+      ${p.bloodType ? `<span class="badge badge-danger">${p.bloodType}</span>` : ""}
+      ${p.allergies ? `<span class="badge badge-danger">حساسية: ${p.allergies}</span>` : ""}
+    `;
+    document.getElementById("tab-info").innerHTML = `
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+        <div><span class="field-label">الرقم الوطني</span>${p.nationalId || "—"}</div>
+        <div><span class="field-label">رقم الهاتف</span>${p.phone || "—"}</div>
+        <div><span class="field-label">تاريخ الميلاد</span>${p.dob || "—"}</div>
+        <div><span class="field-label">تاريخ التسجيل</span>${fmtDate(p.createdAt)}</div>
+        <div class="full"><span class="field-label">العنوان</span>${p.address || "—"}</div>
+        <div class="full"><span class="field-label">أمراض مزمنة / ملاحظات</span>${p.conditions || "لا توجد"}</div>
+      </div>
+    `;
+    document.querySelectorAll(".tab-btn")[0].click();
+    loadVisits(id);
+    document.getElementById("view-modal").classList.add("show");
+  }
+
+  async function loadVisits(patientId) {
+    const listEl = document.getElementById("visits-list");
+    listEl.innerHTML = `<div class="empty-state">جارِ التحميل...</div>`;
+    try {
+      const q = query(collection(db, "patients", patientId, "visits"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        listEl.innerHTML = `<div class="empty-state">لا توجد زيارات بعد</div>`;
+        return;
+      }
+      listEl.innerHTML = snap.docs.map(d => {
+        const v = d.data();
+        return `
+          <div class="visit-item">
+            <div class="v-top"><span>${v.department || "قسم عام"}</span><span>${fmtDate(v.createdAt)}</span></div>
+            <div class="v-diagnosis">${v.diagnosis}</div>
+          </div>`;
+      }).join("");
+    } catch (err) {
+      console.error(err);
+      listEl.innerHTML = `<div class="empty-state">تعذر تحميل السجل</div>`;
+    }
+  }
+
+  document.getElementById("add-visit-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentPatientId) return;
+    const diagnosis = document.getElementById("v-diagnosis").value.trim();
+    const department = document.getElementById("v-department").value.trim();
+    try {
+      await addDoc(collection(db, "patients", currentPatientId, "visits"), {
+        diagnosis, department,
+        createdAt: serverTimestamp(),
+        createdBy: currentUser?.uid || null
+      });
+      document.getElementById("add-visit-form").reset();
+      loadVisits(currentPatientId);
+      showToast("تمت إضافة الزيارة ✓");
+    } catch (err) {
+      console.error(err);
+      showToast("تعذر إضافة الزيارة", true);
+    }
+  });
+
+  // تحميل قائمة المرضى (حي - يتحدث تلقائياً)
+  function subscribePatients() {
+    const q = query(collection(db, "patients"), orderBy("createdAt", "desc"));
+    onSnapshot(q, (snap) => {
+      allPatients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      applySearch();
+    }, (err) => {
+      console.error(err);
+      document.getElementById("patients-tbody").innerHTML =
+        `<tr><td colspan="6"><div class="empty-state">تعذر تحميل بيانات المرضى</div></td></tr>`;
+    });
+  }
+
+  requireAuth(({ user, profile }) => {
+    currentUser = user;
+    renderSidebar("patients", profile);
+    subscribePatients();
+  });
+</script>
+</body>
+</html>
