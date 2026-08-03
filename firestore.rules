@@ -28,7 +28,18 @@ service cloud.firestore {
       }
     }
 
-    // أي مجموعة أخرى تُبنى لاحقاً (مواعيد، صيدلية...) تتبع نفس المبدأ افتراضياً
+    // عداد توليد رقم الملف الطبي الموحّد (MRN)
+    match /counters/{counterId} {
+      allow read, write: if isActiveEmployee();
+    }
+
+    // الطلبات المركزية: أي موظف فعّال يقدر ينشئ طلب أو يقرأ/يحدّث طلبات قسمه
+    // (يمكن تشديدها لاحقاً بحيث كل قسم يعدّل طلباته فقط عبر التحقق من myRole())
+    match /orders/{orderId} {
+      allow read, write: if isActiveEmployee();
+    }
+
+    // أي مجموعة أخرى تُبنى لاحقاً (مواعيد، طوارئ، فوترة...) تتبع نفس المبدأ افتراضياً
     match /{document=**} {
       allow read, write: if false; // منع افتراضي — يُفتح صراحة لكل وحدة جديدة
     }
