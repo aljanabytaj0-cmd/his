@@ -92,6 +92,7 @@
         <table>
           <thead>
             <tr>
+              <th>رقم الملف</th>
               <th>الاسم الكامل</th>
               <th>الجنس</th>
               <th>العمر</th>
@@ -185,6 +186,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="tab-info">البيانات الأساسية</button>
       <button class="tab-btn" data-tab="tab-visits">سجل الزيارات</button>
+      <button class="tab-btn" data-tab="tab-orders">الطلبات والأقسام</button>
     </div>
 
     <div class="tab-panel active" id="tab-info"></div>
@@ -197,6 +199,19 @@
       </form>
       <div id="visits-list"><div class="empty-state">لا توجد زيارات بعد</div></div>
     </div>
+
+    <div class="tab-panel" id="tab-orders">
+      <form id="add-order-form" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <select class="input-field" id="o-department" style="flex:1; min-width:130px;">
+          <option value="pharmacy">💊 الصيدلية</option>
+          <option value="lab">🧪 المختبر</option>
+          <option value="radiology">📷 الأشعة</option>
+        </select>
+        <input type="text" class="input-field" id="o-type" placeholder="مثال: تحليل CBC / دواء أموكسيسيلين" style="flex:2; min-width:180px;" required>
+        <button type="submit" class="btn btn-primary btn-sm">+ إرسال الطلب</button>
+      </form>
+      <div id="orders-list"><div class="empty-state">لا توجد طلبات بعد</div></div>
+    </div>
   </div>
 </div>
 
@@ -206,12 +221,15 @@
   import { requireAuth } from "./assets/js/auth.js";
   import { renderSidebar } from "./assets/js/sidebar.js";
   import { db } from "./assets/js/firebase-config.js";
+  import { generateMRN } from "./assets/js/mrn.js";
+  import { DEPARTMENTS, ORDER_STATUS, createOrder, subscribePatientOrders } from "./assets/js/orders.js";
   import {
     collection, addDoc, getDocs, doc, query, orderBy,
     serverTimestamp, onSnapshot
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   let currentUser = null;
+  let currentUserProfile = null;
   let allPatients = [];
   let currentPatientId = null;
 
@@ -243,6 +261,7 @@
     }
     tbody.innerHTML = list.map(p => `
       <tr data-id="${p.id}">
+        <td><span class="pid">${p.mrn || "—"}</span></td>
         <td><strong>${p.name || "—"}</strong></td>
         <td>${p.gender || "—"}</td>
         <td>${calcAge(p.dob)}</td>
@@ -263,7 +282,8 @@
     const filtered = allPatients.filter(p =>
       (p.name || "").toLowerCase().includes(q) ||
       (p.phone || "").includes(q) ||
-      (p.nationalId || "").includes(q)
+      (p.nationalId || "").includes(q) ||
+      (p.mrn || "").toLowerCase().includes(q)
     );
     renderTable(filtered);
   }
@@ -297,7 +317,9 @@
     btn.disabled = true;
     btn.textContent = "جارِ الحفظ...";
     try {
+      const mrn = await generateMRN();
       await addDoc(collection(db, "patients"), {
+        mrn,
         name: document.getElementById("f-name").value.trim(),
         nationalId: document.getElementById("f-nid").value.trim(),
         phone: document.getElementById("f-phone").value.trim(),
@@ -330,6 +352,7 @@
 
     document.getElementById("view-patient-name").textContent = p.name || "—";
     document.getElementById("view-patient-meta").innerHTML = `
+      <span class="badge badge-neutral">${p.mrn || "—"}</span>
       <span class="badge badge-neutral">${p.gender || "—"}</span>
       <span class="badge badge-neutral">${calcAge(p.dob)} سنة</span>
       ${p.bloodType ? `<span class="badge badge-danger">${p.bloodType}</span>` : ""}
@@ -347,8 +370,60 @@
     `;
     document.querySelectorAll(".tab-btn")[0].click();
     loadVisits(id);
+    subscribeOrdersForPatient(id);
     document.getElementById("view-modal").classList.add("show");
   }
+
+  let unsubscribeOrders = null;
+
+  function subscribeOrdersForPatient(patientId) {
+    if (unsubscribeOrders) unsubscribeOrders();
+    const listEl = document.getElementById("orders-list");
+    listEl.innerHTML = `<div class="empty-state">جارِ التحميل...</div>`;
+    unsubscribeOrders = subscribePatientOrders(patientId, (orders) => {
+      if (!orders.length) {
+        listEl.innerHTML = `<div class="empty-state">لا توجد طلبات بعد</div>`;
+        return;
+      }
+      listEl.innerHTML = orders.map(o => {
+        const dep = DEPARTMENTS[o.department] || { label: o.department, icon: "📋" };
+        const st = ORDER_STATUS[o.status] || { label: o.status, badge: "badge-neutral" };
+        return `
+          <div class="visit-item">
+            <div class="v-top">
+              <span>${dep.icon} ${dep.label}</span>
+              <span class="badge ${st.badge}">${st.label}</span>
+            </div>
+            <div class="v-diagnosis">${o.orderType}</div>
+            ${o.result ? `<div class="v-notes">النتيجة: ${o.result}</div>` : ""}
+          </div>`;
+      }).join("");
+    });
+  }
+
+  document.getElementById("add-order-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentPatientId) return;
+    const patient = allPatients.find(p => p.id === currentPatientId);
+    const department = document.getElementById("o-department").value;
+    const orderType = document.getElementById("o-type").value.trim();
+    try {
+      await createOrder({
+        patientId: currentPatientId,
+        patientName: patient?.name || "",
+        patientMRN: patient?.mrn || "",
+        department,
+        orderType,
+        requestedBy: currentUser?.uid || null,
+        requestedByName: currentUserProfile?.name || ""
+      });
+      document.getElementById("add-order-form").reset();
+      showToast("تم إرسال الطلب للقسم المختص ✓");
+    } catch (err) {
+      console.error(err);
+      showToast("تعذر إرسال الطلب", true);
+    }
+  });
 
   async function loadVisits(patientId) {
     const listEl = document.getElementById("visits-list");
@@ -409,6 +484,7 @@
 
   requireAuth(({ user, profile }) => {
     currentUser = user;
+    currentUserProfile = profile;
     renderSidebar("patients", profile);
     subscribePatients();
   });
