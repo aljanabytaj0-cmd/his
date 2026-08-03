@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>طابور الأقسام — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .filter-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .filter-tab {
+    padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700;
+    background: var(--color-surface); border: 1.5px solid var(--color-border); color: var(--color-text-muted);
+  }
+  .filter-tab.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+
+  .order-card {
+    padding: 18px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .order-card.status-pending { border-right: 4px solid var(--color-accent); }
+  .order-card.status-in_progress { border-right: 4px solid var(--color-primary); }
+  .order-card.status-completed { border-right: 4px solid var(--color-success); opacity: 0.75; }
+
+  .order-main .o-patient { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .order-main .o-mrn { font-family: monospace; font-size: 12px; color: var(--color-text-faint); margin-inline-start: 8px; }
+  .order-main .o-type { font-size: 14px; color: var(--color-text); margin-bottom: 6px; }
+  .order-main .o-meta { font-size: 12px; color: var(--color-text-muted); }
+
+  .order-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 140px; }
+
+  .result-box { margin-top: 10px; display: flex; gap: 8px; }
+  .result-box textarea { flex: 1; min-height: 42px; resize: vertical; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display" id="page-title">طابور القسم</h2>
+      <span class="badge badge-neutral" id="pending-count">0 بانتظار التنفيذ</span>
+    </header>
+
+    <main class="page-body">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-status="all">الكل</button>
+        <button class="filter-tab" data-status="pending">بانتظار التنفيذ</button>
+        <button class="filter-tab" data-status="in_progress">قيد التنفيذ</button>
+        <button class="filter-tab" data-status="completed">مكتمل</button>
+      </div>
+
+      <div id="orders-container">
+        <div class="card"><div class="empty-state">جارِ التحميل...</div></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { DEPARTMENTS, ORDER_STATUS, subscribeDepartmentOrders, updateOrderStatus } from "./assets/js/orders.js";
+
+  const params = new URLSearchParams(window.location.search);
+  const deptKeys = (params.get("dept") || "lab").split(",");
+
+  const deptLabel = deptKeys.map(k => DEPARTMENTS[k]?.label || k).join(" / ");
+  document.getElementById("page-title").textContent = deptLabel;
+  document.title = deptLabel + " — نظام إدارة المستشفى";
+
+  let allOrders = [];
+  let activeFilter = "all";
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString("ar-IQ", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+  }
+
+  function render() {
+    const list = activeFilter === "all" ? allOrders : allOrders.filter(o => o.status === activeFilter);
+    const container = document.getElementById("orders-container");
+
+    document.getElementById("pending-count").textContent =
+      allOrders.filter(o => o.status === "pending").length + " بانتظار التنفيذ";
+
+    if (!list.length) {
+      container.innerHTML = `<div class="card"><div class="empty-state"><div class="e-icon">📋</div>لا توجد طلبات بهذا التصنيف حالياً</div></div>`;
+      return;
+    }
+
+    container.innerHTML = list.map(o => {
+      const dep = DEPARTMENTS[o.department] || { label: o.department, icon: "📋" };
+      const st = ORDER_STATUS[o.status] || { label: o.status, badge: "badge-neutral" };
+      let actions = "";
+      if (o.status === "pending") {
+        actions = `<button class="btn btn-outline btn-sm" data-action="start" data-id="${o.id}">بدء التنفيذ</button>`;
+      } else if (o.status === "in_progress") {
+        actions = `<button class="btn btn-primary btn-sm" data-action="complete" data-id="${o.id}">إكمال مع النتيجة</button>`;
+      } else if (o.status === "completed") {
+        actions = `<span class="badge badge-success">تم بتاريخ ${fmtTime(o.completedAt)}</span>`;
+      }
+
+      return `
+        <div class="card order-card status-${o.status}" data-order-id="${o.id}">
+          <div class="order-main">
+            <div class="o-patient">${dep.icon} ${o.patientName || "مريض غير معروف"} <span class="o-mrn">${o.patientMRN || ""}</span></div>
+            <div class="o-type"><strong>${o.orderType}</strong></div>
+            <div class="o-meta">طلبه: ${o.requestedByName || "—"} • ${fmtTime(o.createdAt)}</div>
+            ${o.result ? `<div class="o-meta" style="margin-top:6px;"><strong>النتيجة:</strong> ${o.result}</div>` : ""}
+            <div class="result-input-slot" style="display:none; margin-top:10px;">
+              <div class="result-box">
+                <textarea class="input-field" placeholder="اكتب النتيجة أو ملاحظة الصرف..."></textarea>
+                <button class="btn btn-primary btn-sm" data-action="submit-result" data-id="${o.id}">حفظ</button>
+              </div>
+            </div>
+          </div>
+          <div class="order-actions">
+            <span class="badge ${st.badge}">${st.label}</span>
+            ${actions}
+          </div>
+        </div>`;
+    }).join("");
+
+    container.querySelectorAll('[data-action="start"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await updateOrderStatus(btn.dataset.id, "in_progress");
+          showToast("تم بدء تنفيذ الطلب");
+        } catch (err) {
+          console.error(err);
+          showToast("تعذر تحديث الحالة", true);
+          btn.disabled = false;
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-action="complete"]').forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = btn.closest(".order-card");
+        card.querySelector(".result-input-slot").style.display = "block";
+        btn.style.display = "none";
+      });
+    });
+
+    container.querySelectorAll('[data-action="submit-result"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".order-card");
+        const resultText = card.querySelector("textarea").value.trim();
+        btn.disabled = true;
+        try {
+          await updateOrderStatus(btn.dataset.id, "completed", { result: resultText });
+          showToast("تم إكمال الطلب وحفظ النتيجة ✓");
+        } catch (err) {
+          console.error(err);
+          showToast("تعذر حفظ النتيجة", true);
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  document.querySelectorAll(".filter-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      activeFilter = tab.dataset.status;
+      render();
+    });
+  });
+
+  requireAuth(({ profile }) => {
+    const sidebarKey = deptKeys[0] === "radiology" ? "lab" : deptKeys[0];
+    renderSidebar(sidebarKey, profile);
+
+    let combined = {};
+    deptKeys.forEach(key => {
+      subscribeDepartmentOrders(key, (orders) => {
+        combined[key] = orders;
+        allOrders = Object.values(combined).flat().sort((a, b) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return tb - ta;
+        });
+        render();
+      });
+    });
+  });
+</script>
+</body>
+</html>
