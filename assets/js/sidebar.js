@@ -1,7 +1,7 @@
 // ============================================
 // بناء القائمة الجانبية حسب صلاحيات المستخدم
 // ============================================
-import { ROLE_LABELS, canAccess, logout } from "./auth.js";
+import { logout } from "./auth.js";
 
 const MODULES = [
   { key: "dashboard",    label: "الرئيسية",              icon: "⌂", href: "dashboard.html",   always: true },
@@ -20,7 +20,6 @@ export function renderSidebar(activeKey, profile) {
   if (!mount) return;
 
   const items = MODULES.map(m => {
-    if (!m.always && !canAccess(profile.role, m.key)) return "";
     const isActive = m.key === activeKey;
     const isDisabled = !!m.soon;
     const cls = ["nav-item", isActive ? "active" : "", isDisabled ? "disabled" : ""].join(" ").trim();
@@ -45,7 +44,7 @@ export function renderSidebar(activeKey, profile) {
         <div class="avatar">${initials}</div>
         <div class="info">
           <div class="uname">${profile.name || "مستخدم"}</div>
-          <div class="urole">${ROLE_LABELS[profile.role] || profile.role || ""}</div>
+          <div class="urole">${(profile.roles || []).map(r => r.name).join("، ") || "بدون دور"}</div>
         </div>
       </div>
       <a href="#" id="logout-btn" class="logout-link">تسجيل الخروج ⟵</a>
