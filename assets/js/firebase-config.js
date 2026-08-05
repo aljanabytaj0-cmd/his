@@ -1,3 +1,9 @@
+// ============================================
+// إعدادات Firebase — نظام إدارة المستشفى
+// ============================================
+// ⚠️ عدّل القيم التالية بالبيانات التي حصلت عليها من Firebase Console
+// (Project Settings → عام → تطبيقاتك → SDK setup and configuration)
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -11,6 +17,6 @@ const firebaseConfig = {
   appId: "1:635351274239:web:395d84d61e2182ff1eb2ca"
 };
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
