@@ -82,8 +82,7 @@
   <div class="toast" id="toast"></div>
 
   <script type="module">
-    import { login } from "./assets/js/auth.js";
-    import { getEmployeeProfile } from "./assets/js/auth.js";
+    import { login, getUserProfile } from "./assets/js/auth.js";
 
     const form = document.getElementById("login-form");
     const errorBox = document.getElementById("login-error");
@@ -107,9 +106,9 @@
 
       try {
         const user = await login(email, password);
-        const profile = await getEmployeeProfile(user.uid);
+        const profile = await getUserProfile(user.uid);
         if (!profile) {
-          errorBox.textContent = "الحساب موجود بنظام الدخول لكن لا يوجد له ملف موظف. راجع مدير النظام.";
+          errorBox.textContent = "الحساب موجود بنظام الدخول لكن لا يوجد له ملف مستخدم. راجع مدير النظام.";
           errorBox.style.display = "block";
           submitBtn.disabled = false;
           submitBtn.textContent = "تسجيل الدخول";
