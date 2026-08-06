@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة الأدمن — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--color-border); margin-bottom: 22px; flex-wrap: wrap; }
+  .tab-btn { padding: 10px 18px; font-size: 14px; font-weight: 700; color: var(--color-text-muted); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1.5px; }
+  .tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .grid-2 .full { grid-column: 1 / -1; }
+
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-bottom: 10px; background: var(--color-surface); }
+  .row-item .r-title { font-weight: 700; font-size: 14.5px; }
+  .row-item .r-sub { font-size: 12.5px; color: var(--color-text-muted); margin-top: 3px; }
+  .row-actions { display: flex; gap: 8px; align-items: center; }
+
+  .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip-check { display: flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 16px; cursor: pointer; }
+  .chip-check input { margin: 0; }
+
+  .role-card { padding: 18px 20px; margin-bottom: 14px; }
+  .role-card .role-name-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .role-card .role-name-row input { max-width: 260px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">لوحة الأدمن</h2>
+    </header>
+
+    <main class="page-body">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-users">المستخدمون</button>
+        <button class="tab-btn" data-tab="tab-roles">الأدوار والصلاحيات</button>
+        <button class="tab-btn" data-tab="tab-departments">الأقسام</button>
+        <button class="tab-btn" data-tab="tab-catalog">كتالوج الخدمات</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-users">
+        <div class="card" style="padding:22px; margin-bottom:20px;">
+          <h3 style="margin-bottom:16px; font-size:15px;">إضافة مستخدم جديد</h3>
+          <form id="add-user-form">
+            <div class="grid-2">
+              <div>
+                <label class="field-label">الاسم الكامل *</label>
+                <input type="text" class="input-field" id="u-name" required>
+              </div>
+              <div>
+                <label class="field-label">البريد الإلكتروني *</label>
+                <input type="email" class="input-field" id="u-email" required>
+              </div>
+              <div>
+                <label class="field-label">كلمة المرور المبدئية *</label>
+                <input type="text" class="input-field" id="u-password" required minlength="6" placeholder="٦ أحرف على الأقل">
+              </div>
+              <div></div>
+              <div class="full">
+                <label class="field-label">الأدوار (يمكن اختيار أكثر من دور)</label>
+                <div class="chip-group" id="u-roles-checks"></div>
+              </div>
+              <div class="full">
+                <label class="field-label">الأقسام المرتبط بها</label>
+                <div class="chip-group" id="u-depts-checks"></div>
+              </div>
+              <div class="full">
+                <button type="submit" class="btn btn-primary" id="add-user-btn">إنشاء الحساب</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <h3 style="margin-bottom:14px; font-size:15px;">المستخدمون الحاليون</h3>
+        <div id="users-list"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-roles">
+        <div class="card" style="padding:22px; margin-bottom:20px;">
+          <h3 style="margin-bottom:16px; font-size:15px;">إضافة دور جديد</h3>
+          <div class="grid-2">
+            <div>
+              <label class="field-label">معرّف الدور (بالإنكليزية، بدون مسافات) *</label>
+              <input type="text" class="input-field" id="new-role-id" placeholder="مثال: lab_supervisor">
+            </div>
+            <div>
+              <label class="field-label">اسم الدور بالعربي *</label>
+              <input type="text" class="input-field" id="new-role-name" placeholder="مثال: مشرف مختبر">
+            </div>
+            <div class="full">
+              <button type="button" class="btn btn-primary btn-sm" id="add-role-btn">+ إضافة الدور</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="roles-list"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-departments">
+        <div class="card" style="padding:22px; margin-bottom:20px;">
+          <h3 style="margin-bottom:16px; font-size:15px;">إضافة قسم جديد</h3>
+          <form id="add-dept-form">
+            <div class="grid-2">
+              <div>
+                <label class="field-label">اسم القسم *</label>
+                <input type="text" class="input-field" id="d-name" required>
+              </div>
+              <div>
+                <label class="field-label">نوع القسم</label>
+                <select class="input-field" id="d-type">
+                  <option value="clinical">سريري (طبي)</option>
+                  <option value="financial">مالي</option>
+                  <option value="administrative">إداري</option>
+                </select>
+              </div>
+              <div class="full">
+                <label class="field-label">نموذج الدفع</label>
+                <select class="input-field" id="d-payment-model">
+                  <option value="per_service">دفع لكل خدمة (الوضع الطبيعي)</option>
+                  <option value="deferred_tab">حساب مفتوح — تصفية عند الخروج (الطوارئ)</option>
+                </select>
+              </div>
+              <div class="full">
+                <button type="submit" class="btn btn-primary">حفظ القسم</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <h3 style="margin-bottom:14px; font-size:15px;">الأقسام الحالية</h3>
+        <div id="departments-list"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-catalog">
+        <div class="card" style="padding:22px; margin-bottom:20px;">
+          <label class="field-label">اختر القسم لعرض/إدارة كتالوجه</label>
+          <select class="input-field" id="catalog-dept-select" style="max-width:340px; margin-bottom:20px;">
+            <option value="">اختر قسماً...</option>
+          </select>
+
+          <div id="catalog-add-form-wrap" style="display:none;">
+            <h3 style="margin-bottom:16px; font-size:15px;">إضافة خدمة للكتالوج</h3>
+            <form id="add-catalog-form">
+              <div class="grid-2">
+                <div>
+                  <label class="field-label">اسم الخدمة *</label>
+                  <input type="text" class="input-field" id="c-name" required placeholder="مثال: CBC">
+                </div>
+                <div>
+                  <label class="field-label">السعر الافتراضي (د.ع)</label>
+                  <input type="number" class="input-field" id="c-price" min="0" step="500" value="0">
+                </div>
+                <div class="full">
+                  <label class="chip-check"><input type="checkbox" id="c-requires-payment" checked> تتطلب دفعاً قبل التنفيذ</label>
+                </div>
+                <div class="full">
+                  <button type="submit" class="btn btn-primary btn-sm">+ إضافة للكتالوج</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div id="catalog-list"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth, requirePermission } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import {
+    PERMISSIONS, getDepartments, addDepartment, updateDepartment,
+    getRoles, saveRole, getCatalogByDepartment, addCatalogService, updateCatalogService
+  } from "./assets/js/api/referenceData.js";
+  import { getUsers, createEmployee, setUserActive, sendPasswordReset } from "./assets/js/api/users.js";
+
+  let currentUser = null, currentUserProfile = null;
+  let allRoles = [], allDepartments = [], allUsers = [];
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  function renderUserFormChecks() {
+    document.getElementById("u-roles-checks").innerHTML = allRoles.map(r =>
+      `<label class="chip-check"><input type="checkbox" value="${r.id}"> ${r.name}</label>`
+    ).join("");
+    document.getElementById("u-depts-checks").innerHTML = allDepartments.map(d =>
+      `<label class="chip-check"><input type="checkbox" value="${d.id}"> ${d.name}</label>`
+    ).join("");
+  }
+
+  document.getElementById("add-user-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("add-user-btn");
+    btn.disabled = true; btn.textContent = "جارِ الإنشاء...";
+
+    const roleIds = Array.from(document.querySelectorAll("#u-roles-checks input:checked")).map(i => i.value);
+    const departmentIds = Array.from(document.querySelectorAll("#u-depts-checks input:checked")).map(i => i.value);
+
+    const result = await createEmployee({
+      name: document.getElementById("u-name").value.trim(),
+      email: document.getElementById("u-email").value.trim(),
+      password: document.getElementById("u-password").value,
+      roleIds, departmentIds,
+      createdBy: currentUser?.uid, createdByName: currentUserProfile?.name
+    });
+
+    if (result.success) {
+      showToast("تم إنشاء الحساب بنجاح ✓");
+      document.getElementById("add-user-form").reset();
+      loadUsers();
+    } else {
+      showToast(result.message, true);
+    }
+    btn.disabled = false; btn.textContent = "إنشاء الحساب";
+  });
+
+  function renderUsersList() {
+    const listEl = document.getElementById("users-list");
+    if (!allUsers.length) {
+      listEl.innerHTML = `<div class="card"><div class="empty-state">لا يوجد مستخدمون بعد</div></div>`;
+      return;
+    }
+    listEl.innerHTML = allUsers.map(u => {
+      const roleNames = (u.roleIds || []).map(id => allRoles.find(r => r.id === id)?.name || id).join("، ") || "بدون دور";
+      const deptNames = (u.departmentIds || []).map(id => allDepartments.find(d => d.id === id)?.name || id).join("، ") || "بدون قسم";
+      return `
+        <div class="row-item">
+          <div>
+            <div class="r-title">${u.name} <span class="pid">${u.email}</span></div>
+            <div class="r-sub">${roleNames} • ${deptNames}</div>
+          </div>
+          <div class="row-actions">
+            <span class="badge ${u.active ? "badge-success" : "badge-danger"}">${u.active ? "فعّال" : "معطّل"}</span>
+            <button class="btn btn-outline btn-sm" data-reset="${u.email}">إعادة تعيين كلمة المرور</button>
+            <button class="btn ${u.active ? "btn-danger" : "btn-primary"} btn-sm" data-toggle="${u.id}" data-active="${u.active}">
+              ${u.active ? "تعطيل" : "تفعيل"}
+            </button>
+          </div>
+        </div>`;
+    }).join("");
+
+    listEl.querySelectorAll("[data-toggle]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await setUserActive(btn.dataset.toggle, btn.dataset.active !== "true", {
+          changedBy: currentUser?.uid, changedByName: currentUserProfile?.name
+        });
+        showToast("تم تحديث حالة الحساب");
+        loadUsers();
+      });
+    });
+    listEl.querySelectorAll("[data-reset]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        try {
+          await sendPasswordReset(btn.dataset.reset);
+          showToast("تم إرسال رابط إعادة التعيين للبريد الإلكتروني ✓");
+        } catch (err) {
+          showToast("تعذر الإرسال — تأكد من صحة البريد", true);
+        }
+      });
+    });
+  }
+
+  async function loadUsers() {
+    allUsers = await getUsers();
+    renderUsersList();
+  }
+
+  function renderRolesList() {
+    const listEl = document.getElementById("roles-list");
+    listEl.innerHTML = allRoles.map(r => `
+      <div class="card role-card" data-role-id="${r.id}">
+        <div class="role-name-row">
+          <input type="text" class="input-field role-name-input" value="${r.name}">
+          <span class="pid">${r.id}</span>
+        </div>
+        <label class="field-label">الصلاحيات</label>
+        <div class="chip-group role-perms-checks" style="margin-bottom:12px;">
+          ${PERMISSIONS.map(p => `
+            <label class="chip-check">
+              <input type="checkbox" value="${p.id}" ${(r.permissions || []).includes(p.id) ? "checked" : ""}> ${p.label}
+            </label>`).join("")}
+        </div>
+        <label class="field-label">نطاق الأقسام</label>
+        <select class="input-field role-scope-select" style="max-width:260px; margin-bottom:14px;">
+          <option value="all" ${r.departmentScope === "all" ? "selected" : ""}>كل الأقسام</option>
+          <option value="specific" ${r.departmentScope !== "all" ? "selected" : ""}>أقسام محددة (تُختار عند إضافة المستخدم)</option>
+        </select>
+        <button class="btn btn-primary btn-sm" data-save-role="${r.id}">حفظ التعديلات</button>
+      </div>
+    `).join("");
+
+    listEl.querySelectorAll("[data-save-role]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".role-card");
+        const roleId = card.dataset.roleId;
+        const name = card.querySelector(".role-name-input").value.trim();
+        const permissions = Array.from(card.querySelectorAll(".role-perms-checks input:checked")).map(i => i.value);
+        const scopeVal = card.querySelector(".role-scope-select").value;
+        const departmentScope = scopeVal === "all" ? "all" : [];
+        try {
+          await saveRole(roleId, { name, permissions, departmentScope });
+          showToast("تم حفظ الدور ✓");
+          loadRoles();
+        } catch (err) {
+          console.error(err);
+          showToast("تعذر الحفظ", true);
+        }
+      });
+    });
+  }
+
+  document.getElementById("add-role-btn").addEventListener("click", async () => {
+    const id = document.getElementById("new-role-id").value.trim().toLowerCase().replace(/\s+/g, "_");
+    const name = document.getElementById("new-role-name").value.trim();
+    if (!id || !name) { showToast("عبّي المعرّف والاسم", true); return; }
+    try {
+      await saveRole(id, { name, permissions: ["view"], departmentScope: [] });
+      document.getElementById("new-role-id").value = "";
+      document.getElementById("new-role-name").value = "";
+      showToast("تمت إضافة الدور ✓");
+      loadRoles();
+    } catch (err) {
+      console.error(err);
+      showToast("تعذر إضافة الدور", true);
+    }
+  });
+
+  async function loadRoles() {
+    allRoles = await getRoles();
+    renderRolesList();
+    renderUserFormChecks();
+  }
+
+  function renderDepartmentsList() {
+    const listEl = document.getElementById("departments-list");
+    if (!allDepartments.length) {
+      listEl.innerHTML = `<div class="card"><div class="empty-state">لا توجد أقسام بعد</div></div>`;
+      return;
+    }
+    const typeLabels = { clinical: "سريري", financial: "مالي", administrative: "إداري" };
+    listEl.innerHTML = allDepartments.map(d => `
+      <div class="row-item">
+        <div>
+          <div class="r-title">${d.name}</div>
+          <div class="r-sub">${typeLabels[d.type] || d.type} • ${d.paymentModel === "deferred_tab" ? "حساب مفتوح (طوارئ)" : "دفع لكل خدمة"}</div>
+        </div>
+        <div class="row-actions">
+          <span class="badge ${d.active !== false ? "badge-success" : "badge-danger"}">${d.active !== false ? "فعّال" : "معطّل"}</span>
+          <button class="btn ${d.active !== false ? "btn-danger" : "btn-primary"} btn-sm" data-toggle-dept="${d.id}" data-active="${d.active !== false}">
+            ${d.active !== false ? "تعطيل" : "تفعيل"}
+          </button>
+        </div>
+      </div>
+    `).join("");
+
+    listEl.querySelectorAll("[data-toggle-dept]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await updateDepartment(btn.dataset.toggleDept, { active: btn.dataset.active !== "true" });
+        showToast("تم التحديث");
+        loadDepartments();
+      });
+    });
+  }
+
+  document.getElementById("add-dept-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await addDepartment({
+        name: document.getElementById("d-name").value.trim(),
+        type: document.getElementById("d-type").value,
+        paymentModel: document.getElementById("d-payment-model").value
+      });
+      document.getElementById("add-dept-form").reset();
+      showToast("تم إضافة القسم ✓");
+      loadDepartments();
+    } catch (err) {
+      console.error(err);
+      showToast("تعذر إضافة القسم", true);
+    }
+  });
+
+  async function loadDepartments() {
+    allDepartments = await getDepartments();
+    renderDepartmentsList();
+    renderUserFormChecks();
+
+    const select = document.getElementById("catalog-dept-select");
+    const currentVal = select.value;
+    select.innerHTML = `<option value="">اختر قسماً...</option>` +
+      allDepartments.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
+    if (currentVal) select.value = currentVal;
+  }
+
+  document.getElementById("catalog-dept-select").addEventListener("change", async (e) => {
+    const deptId = e.target.value;
+    document.getElementById("catalog-add-form-wrap").style.display = deptId ? "block" : "none";
+    if (!deptId) { document.getElementById("catalog-list").innerHTML = ""; return; }
+    await loadCatalog(deptId);
+  });
+
+  async function loadCatalog(deptId) {
+    const listEl = document.getElementById("catalog-list");
+    listEl.innerHTML = `<div class="card"><div class="empty-state">جارِ التحميل...</div></div>`;
+    const items = await getCatalogByDepartment(deptId);
+    if (!items.length) {
+      listEl.innerHTML = `<div class="card"><div class="empty-state">لا توجد خدمات بهذا القسم بعد</div></div>`;
+      return;
+    }
+    listEl.innerHTML = items.map(s => `
+      <div class="row-item">
+        <div>
+          <div class="r-title">${s.name}</div>
+          <div class="r-sub">${Number(s.defaultPrice).toLocaleString()} د.ع • ${s.requiresPayment ? "يتطلب دفعاً" : "لا يتطلب دفعاً"}</div>
+        </div>
+        <button class="btn btn-outline btn-sm" data-toggle-catalog="${s.id}" data-active="${s.active !== false}">
+          ${s.active !== false ? "تعطيل" : "تفعيل"}
+        </button>
+      </div>
+    `).join("");
+
+    listEl.querySelectorAll("[data-toggle-catalog]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await updateCatalogService(btn.dataset.toggleCatalog, { active: btn.dataset.active !== "true" });
+        showToast("تم التحديث");
+        loadCatalog(deptId);
+      });
+    });
+  }
+
+  document.getElementById("add-catalog-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const deptId = document.getElementById("catalog-dept-select").value;
+    if (!deptId) return;
+    try {
+      await addCatalogService({
+        departmentId: deptId,
+        name: document.getElementById("c-name").value.trim(),
+        defaultPrice: document.getElementById("c-price").value,
+        requiresPayment: document.getElementById("c-requires-payment").checked
+      });
+      document.getElementById("add-catalog-form").reset();
+      document.getElementById("c-requires-payment").checked = true;
+      showToast("تمت إضافة الخدمة للكتالوج ✓");
+      loadCatalog(deptId);
+    } catch (err) {
+      console.error(err);
+      showToast("تعذر الإضافة", true);
+    }
+  });
+
+  requireAuth(async ({ user, profile }) => {
+    if (!requirePermission(profile, "manage_users")) return;
+    currentUser = user;
+    currentUserProfile = profile;
+    renderSidebar("admin", profile);
+
+    await loadRoles();
+    await loadDepartments();
+    await loadUsers();
+  });
+</script>
+</body>
+</html>
