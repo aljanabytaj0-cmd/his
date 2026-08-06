@@ -144,7 +144,7 @@
     });
   }
 
-
+  function render() {
     const list = activeFilter === "all" ? allServices : allServices.filter(s => s.status === activeFilter);
     const container = document.getElementById("services-container");
 
