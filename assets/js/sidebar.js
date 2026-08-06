@@ -1,37 +1,71 @@
 // ============================================
-// بناء القائمة الجانبية حسب صلاحيات المستخدم
+// بناء القائمة الجانبية حسب صلاحيات المستخدم — نسخة ديناميكية
+// الأقسام السريرية تُسحب مباشرة من قاعدة البيانات (departments)
 // ============================================
 import { logout } from "./auth.js";
+import { getDepartments } from "./api/referenceData.js";
 
-const MODULES = [
-  { key: "dashboard",    label: "الرئيسية",              icon: "⌂", href: "dashboard.html",   always: true },
-  { key: "patients",     label: "المرضى والملفات الطبية", icon: "🩺", href: "patients.html" },
-  { key: "appointments", label: "المواعيد والحجوزات",     icon: "📅", href: "#", soon: true },
-  { key: "emergency",    label: "الطوارئ والأسرّة",        icon: "🛏", href: "#", soon: true },
-  { key: "pharmacy",     label: "الصيدلية",                icon: "💊", href: "department-queue.html?dept=pharmacy" },
-  { key: "lab",          label: "المختبر والأشعة",         icon: "🧪", href: "department-queue.html?dept=lab,radiology" },
-  { key: "billing",      label: "الفوترة والحسابات",       icon: "💳", href: "#", soon: true },
-  { key: "hr",           label: "الموارد البشرية",         icon: "👥", href: "#", soon: true },
-  { key: "reports",      label: "التقارير الشهرية",        icon: "📊", href: "#", soon: true },
-  { key: "admin",        label: "لوحة الأدمن",             icon: "⚙️", href: "admin.html", requiresPermission: "manage_users" },
+const CORE_MODULES = [
+  { key: "dashboard",  label: "الرئيسية",              icon: "⌂", href: "dashboard.html", always: true },
+  { key: "reception",  label: "الاستعلامات",            icon: "🧾", href: "reception.html", requiresPermission: "create" },
+  { key: "patients",   label: "المرضى والملفات الطبية", icon: "🩺", href: "patients.html" },
 ];
 
-export function renderSidebar(activeKey, profile) {
+const STATIC_TAIL = [
+  { key: "billing",  label: "الفوترة والحسابات",  icon: "💳", href: "#", soon: true },
+  { key: "hr",       label: "الموارد البشرية",    icon: "👥", href: "#", soon: true },
+  { key: "reports",  label: "التقارير الشهرية",   icon: "📊", href: "#", soon: true },
+  { key: "admin",    label: "لوحة الأدمن",        icon: "⚙️", href: "admin.html", requiresPermission: "manage_users" },
+];
+
+const DEPT_ICONS = { clinical: "🏥", financial: "💳", administrative: "🗂️" };
+
+export async function renderSidebar(activeKey, profile) {
   const mount = document.getElementById("sidebar-mount");
   if (!mount) return;
 
-  const items = MODULES.filter(m => {
-    if (!m.requiresPermission) return true;
-    return (profile.permissions || []).includes(m.requiresPermission);
-  }).map(m => {
-    const isActive = m.key === activeKey;
-    const isDisabled = !!m.soon;
-    const cls = ["nav-item", isActive ? "active" : "", isDisabled ? "disabled" : ""].join(" ").trim();
-    const suffix = isDisabled ? ' <span style="opacity:.5;font-size:11px">(قريباً)</span>' : "";
-    return `<a class="${cls}" href="${m.href}"><span class="nav-icon">${m.icon}</span><span>${m.label}${suffix}</span></a>`;
-  }).join("");
+  let departments = [];
+  try {
+    departments = await getDepartments();
+  } catch (err) {
+    console.error("تعذر تحميل الأقسام بالقائمة الجانبية:", err);
+  }
+
+  const visibleDepts = departments.filter(d => {
+    if (d.active === false) return false;
+    if (profile.hasAllDepartments) return true;
+    return (profile.departmentIds || []).includes(d.id);
+  });
+
+  const coreItems = CORE_MODULES.filter(m =>
+    m.always || !m.requiresPermission || (profile.permissions || []).includes(m.requiresPermission)
+  );
+
+  const deptItems = visibleDepts.map(d => ({
+    key: "dept_" + d.id,
+    label: d.name,
+    icon: DEPT_ICONS[d.type] || "🏬",
+    href: `department-queue-v2.html?dept=${d.id}`
+  }));
+
+  const tailItems = STATIC_TAIL.filter(m =>
+    !m.requiresPermission || (profile.permissions || []).includes(m.requiresPermission)
+  );
+
+  function renderGroup(items) {
+    return items.map(m => {
+      const isActive = m.key === activeKey;
+      const isDisabled = !!m.soon;
+      const cls = ["nav-item", isActive ? "active" : "", isDisabled ? "disabled" : ""].join(" ").trim();
+      const suffix = isDisabled ? ' <span style="opacity:.5;font-size:11px">(قريباً)</span>' : "";
+      return `<a class="${cls}" href="${m.href}"><span class="nav-icon">${m.icon}</span><span>${m.label}${suffix}</span></a>`;
+    }).join("");
+  }
 
   const initials = (profile.name || "?").trim().charAt(0);
+  const deptGroupHtml = deptItems.length
+    ? `<div class="nav-group-label">الأقسام</div>${renderGroup(deptItems)}`
+    : "";
 
   mount.innerHTML = `
     <div class="sidebar-brand">
@@ -42,7 +76,10 @@ export function renderSidebar(activeKey, profile) {
       </div>
     </div>
     <div class="nav-group-label">القائمة</div>
-    ${items}
+    ${renderGroup(coreItems)}
+    ${deptGroupHtml}
+    <div class="nav-group-label">إدارة</div>
+    ${renderGroup(tailItems)}
     <div class="sidebar-footer">
       <div class="user-chip">
         <div class="avatar">${initials}</div>
