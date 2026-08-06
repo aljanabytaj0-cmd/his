@@ -81,3 +81,9 @@ export function subscribeVisitServices(visitId, callback) {
   const q = query(collection(db, "services"), where("visitId", "==", visitId), orderBy("createdAt", "desc"));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
+
+// اشتراك حي بكل الخدمات بحالة معيّنة عبر كل الأقسام (تُستخدم بطابور الكاشير الموحّد)
+export function subscribeServicesByStatus(status, callback) {
+  const q = query(collection(db, "services"), where("status", "==", status), orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
