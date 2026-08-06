@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الكاشير — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .pay-card { padding: 18px 22px; margin-bottom: 14px; }
+  .pay-card .pc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .pay-card .pc-patient { font-weight: 800; font-size: 15.5px; }
+  .pay-card .pc-service { font-size: 13.5px; color: var(--color-text-muted); margin-top: 4px; }
+  .pay-card .pc-price { font-family: var(--font-display); font-weight: 800; font-size: 20px; color: var(--color-primary-dark); }
+
+  .pay-form { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--color-border); }
+  .pay-form.show { display: block; }
+  .pay-form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .pay-form-row .field { flex: 1; min-width: 140px; }
+
+  .stat-strip { display: flex; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+  .stat-chip { padding: 10px 18px; background: var(--color-bg-alt); border-radius: var(--radius-md); font-size: 13px; font-weight: 700; color: var(--color-text-muted); }
+  .stat-chip strong { color: var(--color-primary-dark); font-family: var(--font-display); font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">الكاشير</h2>
+    </header>
+
+    <main class="page-body">
+      <div class="stat-strip">
+        <div class="stat-chip"><strong id="stat-count">0</strong> بانتظار الدفع</div>
+        <div class="stat-chip"><strong id="stat-total">0</strong> د.ع إجمالي المبلغ المعلّق</div>
+      </div>
+
+      <div id="pay-container"><div class="card"><div class="empty-state">جارِ التحميل...</div></div></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { subscribeServicesByStatus } from "./assets/js/api/services.js";
+  import { collectPayment } from "./assets/js/api/payments.js";
+  import { getDepartments } from "./assets/js/api/referenceData.js";
+
+  let currentActor = null;
+  let departmentsById = {};
+  let pendingServices = [];
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString("ar-IQ", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+  }
+
+  function render() {
+    const list = pendingServices.filter(s => !s.skipPaymentGate);
+    const container = document.getElementById("pay-container");
+
+    document.getElementById("stat-count").textContent = list.length;
+    document.getElementById("stat-total").textContent =
+      list.reduce((sum, s) => sum + Number(s.finalPrice || s.price || 0), 0).toLocaleString();
+
+    if (!list.length) {
+      container.innerHTML = `<div class="card"><div class="empty-state"><div class="e-icon">💵</div>لا توجد فواتير بانتظار الدفع حالياً</div></div>`;
+      return;
+    }
+
+    container.innerHTML = list.map(s => {
+      const deptName = departmentsById[s.departmentId]?.name || "—";
+      const price = Number(s.finalPrice || s.price || 0);
+      return `
+        <div class="card pay-card" data-id="${s.id}" data-price="${price}" data-visit="${s.visitId}" data-patient="${s.patientId}">
+          <div class="pc-top">
+            <div>
+              <div class="pc-patient">${s.patientName} <span class="pid">${s.patientMRN || ""}</span></div>
+              <div class="pc-service">${s.serviceName} — ${deptName} • ${fmtTime(s.createdAt)}</div>
+            </div>
+            <div style="text-align:left;">
+              <div class="pc-price">${price.toLocaleString()} د.ع</div>
+              <button class="btn btn-primary btn-sm" data-action="open-pay" style="margin-top:8px;">تحصيل الدفعة</button>
+            </div>
+          </div>
+          <div class="pay-form">
+            <div class="pay-form-row">
+              <div class="field">
+                <label class="field-label">الخصم (د.ع، اختياري)</label>
+                <input type="number" class="input-field discount-input" value="0" min="0" max="${price}">
+              </div>
+              <div class="field">
+                <label class="field-label">المبلغ النهائي المستلم</label>
+                <input type="text" class="input-field final-amount-display" value="${price.toLocaleString()} د.ع" disabled>
+              </div>
+              <button class="btn btn-primary" data-action="confirm-pay">تأكيد الاستلام وطباعة الوصل</button>
+              <button class="btn btn-outline" data-action="cancel-pay">إلغاء</button>
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+
+    bindActions(container);
+  }
+
+  function bindActions(container) {
+    container.querySelectorAll('[data-action="open-pay"]').forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = btn.closest(".pay-card");
+        card.querySelector(".pay-form").classList.add("show");
+        btn.style.display = "none";
+      });
+    });
+    container.querySelectorAll('[data-action="cancel-pay"]').forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = btn.closest(".pay-card");
+        card.querySelector(".pay-form").classList.remove("show");
+        card.querySelector('[data-action="open-pay"]').style.display = "inline-flex";
+      });
+    });
+    container.querySelectorAll(".discount-input").forEach(input => {
+      input.addEventListener("input", () => {
+        const card = input.closest(".pay-card");
+        const price = Number(card.dataset.price);
+        const discount = Math.min(Number(input.value) || 0, price);
+        card.querySelector(".final-amount-display").value = (price - discount).toLocaleString() + " د.ع";
+      });
+    });
+    container.querySelectorAll('[data-action="confirm-pay"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".pay-card");
+        const price = Number(card.dataset.price);
+        const discount = Math.min(Number(card.querySelector(".discount-input").value) || 0, price);
+        const amount = price - discount;
+        btn.disabled = true; btn.textContent = "جارِ التحصيل...";
+
+        const result = await collectPayment({
+          visitId: card.dataset.visit,
+          patientId: card.dataset.patient,
+          serviceIds: [card.dataset.id],
+          amount, discount
+        }, currentActor);
+
+        if (result.success) {
+          showToast(`تم تحصيل الدفعة — رقم الوصل: ${result.receiptNumber} ✓`);
+        } else {
+          showToast("تعذر تسجيل الدفعة", true);
+          btn.disabled = false; btn.textContent = "تأكيد الاستلام وطباعة الوصل";
+        }
+      });
+    });
+  }
+
+  requireAuth(async ({ user, profile }) => {
+    currentActor = { uid: user.uid, name: profile.name };
+    renderSidebar("cashier", profile);
+
+    const departments = await getDepartments();
+    departmentsById = Object.fromEntries(departments.map(d => [d.id, d]));
+
+    subscribeServicesByStatus("waiting_for_payment", (services) => {
+      pendingServices = services;
+      render();
+    });
+  });
+</script>
+</body>
+</html>
