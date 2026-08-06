@@ -13,13 +13,17 @@ const MODULES = [
   { key: "billing",      label: "الفوترة والحسابات",       icon: "💳", href: "#", soon: true },
   { key: "hr",           label: "الموارد البشرية",         icon: "👥", href: "#", soon: true },
   { key: "reports",      label: "التقارير الشهرية",        icon: "📊", href: "#", soon: true },
+  { key: "admin",        label: "لوحة الأدمن",             icon: "⚙️", href: "admin.html", requiresPermission: "manage_users" },
 ];
 
 export function renderSidebar(activeKey, profile) {
   const mount = document.getElementById("sidebar-mount");
   if (!mount) return;
 
-  const items = MODULES.map(m => {
+  const items = MODULES.filter(m => {
+    if (!m.requiresPermission) return true;
+    return (profile.permissions || []).includes(m.requiresPermission);
+  }).map(m => {
     const isActive = m.key === activeKey;
     const isDisabled = !!m.soon;
     const cls = ["nav-item", isActive ? "active" : "", isDisabled ? "disabled" : ""].join(" ").trim();
