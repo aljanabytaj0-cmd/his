@@ -13,12 +13,14 @@ export async function createVisit({ patientId, patientName, patientMRN, visitTyp
     return { success: false, errorCode: "INVALID_REFERRAL", message: "يجب تحديد قسم واحد على الأقل" };
   }
   try {
+    const enrichedReferrals = referrals.map(r => ({ ...r, sentAt: new Date().toISOString(), status: "pending" }));
     const docRef = await addDoc(collection(db, "visits"), {
       patientId, patientName, patientMRN,
       visitType: visitType || "normal",
       priority: priority || "normal",
       status: "sent",
-      referrals: referrals.map(r => ({ ...r, sentAt: new Date().toISOString(), status: "pending" })),
+      referrals: enrichedReferrals,
+      referralDepartmentIds: referrals.map(r => r.departmentId),
       paymentModel: paymentModel || "per_service",
       settlementStatus: "open",
       dischargedAt: null,
@@ -46,7 +48,8 @@ export async function addReferral(visitId, referral, actor) {
     return { success: false, errorCode: "VISIT_CLOSED", message: "الزيارة مقفلة — أعد فتحها أولاً" };
   }
   const referrals = [...(visit.referrals || []), { ...referral, sentAt: new Date().toISOString(), status: "pending" }];
-  await updateDoc(doc(db, "visits", visitId), { referrals });
+  const referralDepartmentIds = [...(visit.referralDepartmentIds || []), referral.departmentId];
+  await updateDoc(doc(db, "visits", visitId), { referrals, referralDepartmentIds });
   await record({
     userId: actor?.uid, userName: actor?.name,
     action: "update", entityType: "visits", entityId: visitId,
@@ -89,6 +92,27 @@ export async function reopenVisit(visitId, reason, actor) {
 export function subscribePatientVisits(patientId, callback) {
   const q = query(collection(db, "visits"), where("patientId", "==", patientId), orderBy("createdAt", "desc"));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+// اشتراك حي بكل الزيارات المُحالة لقسم معيّن (تُستخدم بشاشة طابور القسم لعرض التحويلات الجديدة)
+export function subscribeDepartmentReferrals(departmentId, callback) {
+  const q = query(
+    collection(db, "visits"),
+    where("referralDepartmentIds", "array-contains", departmentId),
+    orderBy("createdAt", "desc")
+  );
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+// يُستدعى بعد إضافة أول خدمة من قسم معيّن على تحويل، لتعليمه "مستلم" فيختفي من قائمة "بانتظار الاستلام"
+export async function markReferralReceived(visitId, departmentId) {
+  const visitSnap = await getDoc(doc(db, "visits", visitId));
+  if (!visitSnap.exists()) return;
+  const visit = visitSnap.data();
+  const referrals = (visit.referrals || []).map(r =>
+    r.departmentId === departmentId && r.status === "pending" ? { ...r, status: "received" } : r
+  );
+  await updateDoc(doc(db, "visits", visitId), { referrals });
 }
 
 export async function getVisit(visitId) {
