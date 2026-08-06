@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الاستعلامات — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--color-border); margin-bottom: 22px; }
+  .tab-btn { padding: 10px 18px; font-size: 14px; font-weight: 700; color: var(--color-text-muted); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1.5px; }
+  .tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .full { grid-column: 1 / -1; }
+  .section-title { font-size: 13px; font-weight: 800; color: var(--color-primary-dark); margin: 6px 0 12px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
+  .section-title:first-child { border-top: none; padding-top: 0; }
+
+  .patient-result { padding: 12px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin-bottom: 8px; cursor: pointer; display:flex; justify-content:space-between; align-items:center; }
+  .patient-result:hover { background: var(--color-bg-alt); }
+  .patient-result .pr-name { font-weight: 700; }
+  .patient-result .pr-meta { font-size: 12px; color: var(--color-text-muted); }
+
+  .selected-patient-card { padding: 16px 20px; background: var(--color-bg-alt); border-radius: var(--radius-md); margin-bottom: 18px; display:flex; justify-content:space-between; align-items:center; }
+
+  .chip-check { display: flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 8px 12px; border: 1.5px solid var(--color-border); border-radius: 8px; cursor: pointer; }
+  .chip-check.checked { border-color: var(--color-primary); background: var(--color-bg-alt); }
+  .chip-group { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">الاستعلامات</h2>
+    </header>
+
+    <main class="page-body">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-search">بحث / اختيار مريض</button>
+        <button class="tab-btn" data-tab="tab-register">تسجيل مريض جديد</button>
+        <button class="tab-btn" data-tab="tab-visit" id="visit-tab-btn" style="display:none;">إنشاء زيارة</button>
+      </div>
+
+      <!-- بحث -->
+      <div class="tab-panel active" id="tab-search">
+        <div class="card" style="padding:22px;">
+          <label class="field-label">ابحث بالاسم، رقم الهاتف، أو رقم الملف</label>
+          <input type="text" class="input-field" id="search-input" placeholder="اكتب للبحث...">
+          <div id="search-results" style="margin-top:14px;"></div>
+        </div>
+      </div>
+
+      <!-- تسجيل مريض جديد -->
+      <div class="tab-panel" id="tab-register">
+        <div class="card" style="padding:22px;">
+          <form id="register-form">
+            <div class="section-title">بيانات شخصية</div>
+            <div class="grid-3">
+              <div><label class="field-label">الاسم الكامل *</label><input type="text" class="input-field" id="p-name" required></div>
+              <div><label class="field-label">اسم الأم</label><input type="text" class="input-field" id="p-mother"></div>
+              <div><label class="field-label">الجنس</label>
+                <select class="input-field" id="p-gender"><option value="ذكر">ذكر</option><option value="أنثى">أنثى</option></select>
+              </div>
+              <div><label class="field-label">العمر</label><input type="number" class="input-field" id="p-age" min="0" max="130"></div>
+              <div><label class="field-label">الحالة الاجتماعية</label>
+                <select class="input-field" id="p-marital">
+                  <option value="">غير محدد</option><option>أعزب</option><option>متزوج</option><option>مطلق</option><option>أرمل</option>
+                </select>
+              </div>
+              <div><label class="field-label">الجنسية</label><input type="text" class="input-field" id="p-nationality" value="عراقي"></div>
+            </div>
+
+            <div class="section-title">التواصل والعنوان</div>
+            <div class="grid-3">
+              <div><label class="field-label">رقم الهاتف</label><input type="tel" class="input-field" id="p-phone"></div>
+              <div><label class="field-label">رقم هاتف بديل</label><input type="tel" class="input-field" id="p-altphone"></div>
+              <div><label class="field-label">المحافظة</label><input type="text" class="input-field" id="p-province"></div>
+              <div><label class="field-label">القضاء</label><input type="text" class="input-field" id="p-district"></div>
+              <div class="full"><label class="field-label">العنوان التفصيلي</label><input type="text" class="input-field" id="p-address"></div>
+            </div>
+
+            <div class="section-title">بيانات الهوية</div>
+            <div class="grid-3">
+              <div><label class="field-label">رقم الهوية</label><input type="text" class="input-field" id="p-nid"></div>
+              <div><label class="field-label">رقم البطاقة الوطنية</label><input type="text" class="input-field" id="p-cardnum"></div>
+              <div><label class="field-label">فصيلة الدم</label>
+                <select class="input-field" id="p-blood">
+                  <option value="">غير معروف</option>
+                  <option>A+</option><option>A-</option><option>B+</option><option>B-</option>
+                  <option>AB+</option><option>AB-</option><option>O+</option><option>O-</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="section-title">بيانات طبية وتأمينية</div>
+            <div class="grid-3">
+              <div><label class="field-label">الحساسية</label><input type="text" class="input-field" id="p-allergies" placeholder="مثال: بنسلين"></div>
+              <div><label class="field-label">الأمراض المزمنة</label><input type="text" class="input-field" id="p-chronic"></div>
+              <div><label class="field-label">شركة التأمين</label><input type="text" class="input-field" id="p-insurance"></div>
+              <div><label class="field-label">رقم التأمين</label><input type="text" class="input-field" id="p-insurance-num"></div>
+              <div class="full"><label class="field-label">ملاحظات عامة</label><textarea class="input-field" id="p-notes" rows="2"></textarea></div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="register-btn">حفظ وإنشاء الملف</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- إنشاء زيارة -->
+      <div class="tab-panel" id="tab-visit">
+        <div class="selected-patient-card" id="selected-patient-card"></div>
+
+        <div class="card" style="padding:22px;">
+          <form id="visit-form">
+            <div class="grid-2">
+              <div>
+                <label class="field-label">نوع الزيارة</label>
+                <select class="input-field" id="v-type">
+                  <option value="normal">عادي</option>
+                  <option value="emergency">طارئ</option>
+                  <option value="referral">إحالة</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">الأولوية</label>
+                <select class="input-field" id="v-priority">
+                  <option value="normal">عادي</option>
+                  <option value="urgent">مستعجل</option>
+                  <option value="critical">حرج</option>
+                </select>
+              </div>
+              <div class="full">
+                <label class="field-label">حوّل المريض إلى (اختر قسماً واحداً أو أكثر) *</label>
+                <div class="chip-group" id="referral-checks"></div>
+              </div>
+              <div class="full">
+                <label class="field-label">ملاحظات</label>
+                <textarea class="input-field" id="v-notes" rows="2"></textarea>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary" id="send-visit-btn">إرسال الزيارة للأقسام</button>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { createPatient, subscribeAllPatients } from "./assets/js/api/patients.js";
+  import { createVisit } from "./assets/js/api/visits.js";
+  import { getDepartments } from "./assets/js/api/referenceData.js";
+
+  let currentUser = null, currentActor = null;
+  let allPatients = [];
+  let allDepartments = [];
+  let selectedPatient = null;
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  function switchTab(tabId) {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === tabId));
+  }
+  document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
+
+  // ============ بحث ============
+  document.getElementById("search-input").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    const box = document.getElementById("search-results");
+    if (!q) { box.innerHTML = ""; return; }
+    const results = allPatients.filter(p =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.phone || "").includes(q) ||
+      (p.mrn || "").toLowerCase().includes(q) ||
+      (p.nationalId || "").includes(q)
+    ).slice(0, 8);
+
+    box.innerHTML = results.length
+      ? results.map(p => `
+          <div class="patient-result" data-id="${p.id}">
+            <div><div class="pr-name">${p.name}</div><div class="pr-meta">${p.mrn || ""} • ${p.phone || "بدون هاتف"}</div></div>
+            <button type="button" class="btn btn-primary btn-sm">اختيار ⟵ إنشاء زيارة</button>
+          </div>`).join("")
+      : `<div class="empty-state">لا نتائج — جرّب تبويب "تسجيل مريض جديد"</div>`;
+
+    box.querySelectorAll(".patient-result").forEach(el => {
+      el.addEventListener("click", () => selectPatient(allPatients.find(p => p.id === el.dataset.id)));
+    });
+  });
+
+  function selectPatient(patient) {
+    selectedPatient = patient;
+    document.getElementById("visit-tab-btn").style.display = "inline-block";
+    document.getElementById("selected-patient-card").innerHTML = `
+      <div><strong>${patient.name}</strong> <span class="pid">${patient.mrn}</span></div>
+      <span class="badge badge-neutral">${patient.phone || "بدون هاتف"}</span>
+    `;
+    switchTab("tab-visit");
+  }
+
+  // ============ تسجيل مريض جديد ============
+  document.getElementById("register-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("register-btn");
+    btn.disabled = true; btn.textContent = "جارِ الحفظ...";
+
+    const result = await createPatient({
+      name: document.getElementById("p-name").value.trim(),
+      motherName: document.getElementById("p-mother").value.trim(),
+      gender: document.getElementById("p-gender").value,
+      age: document.getElementById("p-age").value,
+      maritalStatus: document.getElementById("p-marital").value,
+      nationality: document.getElementById("p-nationality").value.trim(),
+      phone: document.getElementById("p-phone").value.trim(),
+      altPhone: document.getElementById("p-altphone").value.trim(),
+      province: document.getElementById("p-province").value.trim(),
+      district: document.getElementById("p-district").value.trim(),
+      address: document.getElementById("p-address").value.trim(),
+      nationalId: document.getElementById("p-nid").value.trim(),
+      cardNumber: document.getElementById("p-cardnum").value.trim(),
+      bloodType: document.getElementById("p-blood").value,
+      allergies: document.getElementById("p-allergies").value.trim(),
+      chronicConditions: document.getElementById("p-chronic").value.trim(),
+      insuranceProvider: document.getElementById("p-insurance").value.trim(),
+      insuranceNumber: document.getElementById("p-insurance-num").value.trim(),
+      notes: document.getElementById("p-notes").value.trim()
+    }, currentActor);
+
+    if (result.success) {
+      showToast(`تم إنشاء الملف بنجاح — رقم الملف: ${result.mrn} ✓`);
+      document.getElementById("register-form").reset();
+      const newPatient = await new Promise(resolve => {
+        const unsub = subscribeAllPatients(list => { unsub(); resolve(list.find(p => p.id === result.patientId)); });
+      });
+      selectPatient(newPatient || { id: result.patientId, name: document.getElementById("p-name").value, mrn: result.mrn });
+    } else {
+      showToast(result.message, true);
+    }
+    btn.disabled = false; btn.textContent = "حفظ وإنشاء الملف";
+  });
+
+  // ============ إنشاء الزيارة ============
+  function renderReferralChecks() {
+    document.getElementById("referral-checks").innerHTML = allDepartments
+      .filter(d => d.active !== false)
+      .map(d => `<label class="chip-check"><input type="checkbox" value="${d.id}" data-name="${d.name}"> ${d.name}</label>`)
+      .join("");
+
+    document.querySelectorAll("#referral-checks input").forEach(cb => {
+      cb.addEventListener("change", () => cb.closest("label").classList.toggle("checked", cb.checked));
+    });
+  }
+
+  document.getElementById("visit-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!selectedPatient) return;
+    const checked = Array.from(document.querySelectorAll("#referral-checks input:checked"));
+    if (!checked.length) { showToast("اختر قسماً واحداً على الأقل", true); return; }
+
+    const dept = allDepartments.find(d => d.id === checked[0].value);
+    const btn = document.getElementById("send-visit-btn");
+    btn.disabled = true; btn.textContent = "جارِ الإرسال...";
+
+    const result = await createVisit({
+      patientId: selectedPatient.id,
+      patientName: selectedPatient.name,
+      patientMRN: selectedPatient.mrn,
+      visitType: document.getElementById("v-type").value,
+      priority: document.getElementById("v-priority").value,
+      referrals: checked.map(cb => ({ departmentId: cb.value, departmentName: cb.dataset.name })),
+      notes: document.getElementById("v-notes").value.trim(),
+      paymentModel: dept?.paymentModel || "per_service"
+    }, currentActor);
+
+    if (result.success) {
+      showToast("تم إرسال الزيارة للأقسام المختارة ✓");
+      document.getElementById("visit-form").reset();
+      document.querySelectorAll("#referral-checks label").forEach(l => l.classList.remove("checked"));
+      selectedPatient = null;
+      document.getElementById("visit-tab-btn").style.display = "none";
+      switchTab("tab-search");
+      document.getElementById("search-input").value = "";
+      document.getElementById("search-results").innerHTML = "";
+    } else {
+      showToast(result.message, true);
+    }
+    btn.disabled = false; btn.textContent = "إرسال الزيارة للأقسام";
+  });
+
+  requireAuth(({ user, profile }) => {
+    currentUser = user;
+    currentActor = { uid: user.uid, name: profile.name };
+    renderSidebar("reception", profile);
+
+    subscribeAllPatients((list) => { allPatients = list; });
+    getDepartments().then(list => { allDepartments = list; renderReferralChecks(); });
+  });
+</script>
+</body>
+</html>
