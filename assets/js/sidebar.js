@@ -12,6 +12,7 @@ const CORE_MODULES = [
 ];
 
 const STATIC_TAIL = [
+  { key: "cashier",  label: "الكاشير",             icon: "💵", href: "cashier.html", requiresPermission: "view_financial" },
   { key: "billing",  label: "الفوترة والحسابات",  icon: "💳", href: "#", soon: true },
   { key: "hr",       label: "الموارد البشرية",    icon: "👥", href: "#", soon: true },
   { key: "reports",  label: "التقارير الشهرية",   icon: "📊", href: "#", soon: true },
