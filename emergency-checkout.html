@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تصفية حساب الطوارئ — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .search-row { display: flex; gap: 10px; margin-bottom: 24px; }
+  .search-row input { flex: 1; }
+
+  .visit-result { padding: 14px 18px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin-bottom: 8px; cursor: pointer; }
+  .visit-result:hover { background: var(--color-bg-alt); border-color: var(--color-primary); }
+  .visit-result .vr-name { font-weight: 700; }
+  .visit-result .vr-meta { font-size: 12px; color: var(--color-text-muted); }
+
+  .settle-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 18px 22px; background: var(--color-bg-alt); border-radius: var(--radius-md); }
+  .service-line { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .service-line:last-child { border-bottom: none; }
+
+  .total-row { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; margin-top: 10px; border-top: 2px solid var(--color-primary); }
+  .total-row .amount { font-family: var(--font-display); font-weight: 800; font-size: 24px; color: var(--color-primary-dark); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">تصفية حساب الطوارئ</h2>
+    </header>
+
+    <main class="page-body">
+      <div class="card" style="padding:22px; margin-bottom:20px;">
+        <label class="field-label">ابحث بالاسم أو رقم الملف عن مريض له زيارة طوارئ مفتوحة</label>
+        <div class="search-row">
+          <input type="text" class="input-field" id="search-input" placeholder="اكتب للبحث...">
+        </div>
+        <div id="search-results"></div>
+      </div>
+
+      <div id="settle-panel"></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { subscribeVisitServices } from "./assets/js/api/services.js";
+  import { settleEmergencyTab } from "./assets/js/api/payments.js";
+  import { db } from "./assets/js/firebase-config.js";
+  import { collection, query, where, getDocs }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  let currentActor = null;
+  let selectedVisit = null;
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  document.getElementById("search-input").addEventListener("input", async (e) => {
+    const q = e.target.value.trim();
+    const box = document.getElementById("search-results");
+    if (q.length < 2) { box.innerHTML = ""; return; }
+
+    // نبحث عن زيارات طوارئ مفتوحة (settlementStatus == open) ونطابق الاسم/الرقم يدوياً
+    const snap = await getDocs(query(
+      collection(db, "visits"),
+      where("paymentModel", "==", "deferred_tab"),
+      where("settlementStatus", "==", "open")
+    ));
+    const results = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(v => (v.patientName || "").includes(q) || (v.patientMRN || "").toLowerCase().includes(q.toLowerCase()));
+
+    box.innerHTML = results.length
+      ? results.map(v => `
+          <div class="visit-result" data-id="${v.id}">
+            <div class="vr-name">${v.patientName} <span class="pid">${v.patientMRN || ""}</span></div>
+            <div class="vr-meta">زيارة مفتوحة — ${v.notes || "بدون ملاحظات"}</div>
+          </div>`).join("")
+      : `<div class="empty-state">لا توجد زيارات طوارئ مفتوحة مطابقة</div>`;
+
+    box.querySelectorAll(".visit-result").forEach(el => {
+      el.addEventListener("click", () => loadVisit(results.find(v => v.id === el.dataset.id)));
+    });
+  });
+
+  function loadVisit(visit) {
+    selectedVisit = visit;
+    document.getElementById("search-results").innerHTML = "";
+    document.getElementById("search-input").value = "";
+
+    subscribeVisitServices(visit.id, (services) => {
+      const active = services.filter(s => !["cancelled", "rejected"].includes(s.status));
+      const total = active.reduce((sum, s) => sum + Number(s.finalPrice || s.price || 0), 0);
+
+      const panel = document.getElementById("settle-panel");
+      panel.innerHTML = `
+        <div class="settle-header">
+          <div>
+            <div style="font-weight:800; font-size:16px;">${visit.patientName}</div>
+            <div class="pid">${visit.patientMRN || ""}</div>
+          </div>
+          <span class="badge badge-danger">حساب مفتوح</span>
+        </div>
+        <div class="card" style="padding:0; overflow:hidden;">
+          ${active.length
+            ? active.map(s => `
+                <div class="service-line">
+                  <span>${s.serviceName}</span>
+                  <span>${Number(s.finalPrice || s.price || 0).toLocaleString()} د.ع</span>
+                </div>`).join("")
+            : `<div class="empty-state" style="padding:24px;">لا توجد خدمات مسجّلة على هذي الزيارة</div>`}
+        </div>
+        <div class="total-row">
+          <span style="font-weight:700;">الإجمالي المستحق</span>
+          <span class="amount">${total.toLocaleString()} د.ع</span>
+        </div>
+        <button class="btn btn-primary" id="settle-btn" ${!active.length ? "disabled" : ""} style="width:100%; justify-content:center; padding:14px;">
+          تصفية الحساب وإغلاق الزيارة
+        </button>
+      `;
+
+      document.getElementById("settle-btn")?.addEventListener("click", async () => {
+        const btn = document.getElementById("settle-btn");
+        btn.disabled = true; btn.textContent = "جارِ التصفية...";
+        const result = await settleEmergencyTab(visit.id, currentActor);
+        if (result.success) {
+          showToast(`تمت التصفية بنجاح — رقم الوصل: ${result.receiptNumber} ✓`);
+          document.getElementById("settle-panel").innerHTML = "";
+        } else {
+          showToast("تعذرت التصفية", true);
+          btn.disabled = false; btn.textContent = "تصفية الحساب وإغلاق الزيارة";
+        }
+      });
+    });
+  }
+
+  requireAuth(({ user, profile }) => {
+    currentActor = { uid: user.uid, name: profile.name };
+    renderSidebar("emergency_checkout", profile);
+  });
+</script>
+</body>
+</html>

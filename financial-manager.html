@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>المدير المالي — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .req-card { padding: 18px 22px; margin-bottom: 14px; }
+  .req-card .rq-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .req-card .rq-type { font-weight: 800; font-size: 15px; }
+  .req-card .rq-meta { font-size: 12.5px; color: var(--color-text-muted); margin-bottom: 10px; }
+  .req-card .rq-reason { padding: 10px 14px; background: var(--color-bg-alt); border-radius: var(--radius-sm); font-size: 13.5px; margin-bottom: 14px; }
+  .req-actions { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .req-actions textarea { flex: 1; min-width: 200px; min-height: 40px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display">المدير المالي — طلبات الموافقة</h2>
+      <span class="badge badge-neutral" id="pending-count">0 طلب معلّق</span>
+    </header>
+
+    <main class="page-body">
+      <div id="requests-container"><div class="card"><div class="empty-state">جارِ التحميل...</div></div></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth, requirePermission } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { subscribePendingApprovals, reviewApproval } from "./assets/js/api/approvals.js";
+
+  let currentActor = null;
+
+  const TYPE_LABELS = {
+    cancel_after_payment: "طلب إلغاء خدمة بعد الدفع",
+    excessive_discount: "طلب خصم يتجاوز الحد المسموح"
+  };
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString("ar-IQ", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+  }
+
+  function render(requests) {
+    const container = document.getElementById("requests-container");
+    document.getElementById("pending-count").textContent = requests.length + " طلب معلّق";
+
+    if (!requests.length) {
+      container.innerHTML = `<div class="card"><div class="empty-state"><div class="e-icon">✅</div>لا توجد طلبات معلّقة حالياً</div></div>`;
+      return;
+    }
+
+    container.innerHTML = requests.map(r => `
+      <div class="card req-card" data-id="${r.id}">
+        <div class="rq-top">
+          <span class="rq-type">${TYPE_LABELS[r.type] || r.type}</span>
+          <span class="badge badge-danger">${Number(r.amount).toLocaleString()} د.ع</span>
+        </div>
+        <div class="rq-meta">مقدّم الطلب: ${r.requestedByName || "—"} • ${fmtTime(r.createdAt)}</div>
+        <div class="rq-reason"><strong>السبب:</strong> ${r.reason}</div>
+        <div class="req-actions">
+          <textarea class="input-field review-note" placeholder="ملاحظة (اختياري للاعتماد، إلزامية للرفض)"></textarea>
+          <button class="btn btn-primary" data-action="approve">اعتماد</button>
+          <button class="btn btn-danger" data-action="reject">رفض</button>
+        </div>
+      </div>
+    `).join("");
+
+    container.querySelectorAll('[data-action="approve"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".req-card");
+        const note = card.querySelector(".review-note").value.trim();
+        btn.disabled = true;
+        await reviewApproval(card.dataset.id, "approved", note, currentActor);
+        showToast("تم اعتماد الطلب ✓");
+      });
+    });
+    container.querySelectorAll('[data-action="reject"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".req-card");
+        const note = card.querySelector(".review-note").value.trim();
+        if (!note) { showToast("سبب الرفض إلزامي", true); return; }
+        btn.disabled = true;
+        await reviewApproval(card.dataset.id, "rejected", note, currentActor);
+        showToast("تم رفض الطلب");
+      });
+    });
+  }
+
+  requireAuth(({ user, profile }) => {
+    if (!requirePermission(profile, "approve")) return;
+    currentActor = { uid: user.uid, name: profile.name };
+    renderSidebar("financial_manager", profile);
+    subscribePendingApprovals((requests) => render(requests));
+  });
+</script>
+</body>
+</html>
