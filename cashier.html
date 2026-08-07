@@ -52,7 +52,10 @@
   import { renderSidebar } from "./assets/js/sidebar.js";
   import { subscribeServicesByStatus } from "./assets/js/api/services.js";
   import { collectPayment } from "./assets/js/api/payments.js";
+  import { requestApproval } from "./assets/js/api/approvals.js";
   import { getDepartments } from "./assets/js/api/referenceData.js";
+
+  const DISCOUNT_APPROVAL_THRESHOLD = 0.20; // أي خصم يتجاوز ٢٠٪ من السعر يحتاج موافقة مالية
 
   let currentActor = null;
   let departmentsById = {};
@@ -140,6 +143,25 @@
         const price = Number(card.dataset.price);
         const discount = Math.min(Number(input.value) || 0, price);
         card.querySelector(".final-amount-display").value = (price - discount).toLocaleString() + " د.ع";
+
+        const confirmBtn = card.querySelector('[data-action="confirm-pay"]');
+        const exceedsLimit = price > 0 && (discount / price) > DISCOUNT_APPROVAL_THRESHOLD;
+        let warningEl = card.querySelector(".discount-warning");
+        if (exceedsLimit) {
+          if (!warningEl) {
+            warningEl = document.createElement("div");
+            warningEl.className = "discount-warning";
+            warningEl.style.cssText = "font-size:12px;color:var(--color-danger);margin-top:6px;width:100%;";
+            card.querySelector(".pay-form-row").insertAdjacentElement("beforebegin", warningEl);
+          }
+          warningEl.textContent = "⚠️ الخصم يتجاوز 20٪ من السعر — يحتاج موافقة المدير المالي بدل التحصيل المباشر";
+          confirmBtn.textContent = "إرسال طلب موافقة على الخصم";
+          confirmBtn.dataset.needsApproval = "true";
+        } else {
+          if (warningEl) warningEl.remove();
+          confirmBtn.textContent = "تأكيد الاستلام وطباعة الوصل";
+          confirmBtn.dataset.needsApproval = "false";
+        }
       });
     });
     container.querySelectorAll('[data-action="confirm-pay"]').forEach(btn => {
@@ -148,8 +170,27 @@
         const price = Number(card.dataset.price);
         const discount = Math.min(Number(card.querySelector(".discount-input").value) || 0, price);
         const amount = price - discount;
-        btn.disabled = true; btn.textContent = "جارِ التحصيل...";
 
+        if (btn.dataset.needsApproval === "true") {
+          const reason = prompt("سبب طلب الخصم الكبير (إلزامي، سيُرسل للمدير المالي):");
+          if (!reason || !reason.trim()) return;
+          btn.disabled = true; btn.textContent = "جارِ الإرسال...";
+          const result = await requestApproval({
+            type: "excessive_discount",
+            relatedServiceId: card.dataset.id,
+            reason: reason.trim(),
+            amount: discount
+          }, currentActor);
+          if (result.success) {
+            showToast("تم إرسال طلب الموافقة على الخصم للمدير المالي ✓");
+          } else {
+            showToast(result.message, true);
+            btn.disabled = false; btn.textContent = "إرسال طلب موافقة على الخصم";
+          }
+          return;
+        }
+
+        btn.disabled = true; btn.textContent = "جارِ التحصيل...";
         const result = await collectPayment({
           visitId: card.dataset.visit,
           patientId: card.dataset.patient,
