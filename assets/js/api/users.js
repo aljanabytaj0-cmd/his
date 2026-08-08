@@ -13,7 +13,7 @@ import { record } from "./auditLog.js";
 
 // إنشاء موظف جديد بدون تسجيل خروج الأدمن الحالي:
 // نستخدم نسخة ثانوية مؤقتة من تطبيق Firebase بس لعملية الإنشاء، ثم نتخلص منها فوراً.
-export async function createEmployee({ name, email, password, roleIds, departmentIds, createdBy, createdByName }) {
+export async function createEmployee({ name, email, password, roleIds, departmentIds, isConsultant, specialty, createdBy, createdByName }) {
   const secondaryApp = initializeApp(app.options, "secondary-" + Date.now());
   const secondaryAuth = getAuth(secondaryApp);
   try {
@@ -24,6 +24,8 @@ export async function createEmployee({ name, email, password, roleIds, departmen
       name, email,
       roleIds: roleIds || [],
       departmentIds: departmentIds || [],
+      isConsultant: !!isConsultant,
+      specialty: isConsultant ? (specialty || "") : "",
       active: true,
       createdAt: new Date(),
       createdBy
@@ -32,7 +34,7 @@ export async function createEmployee({ name, email, password, roleIds, departmen
     await record({
       userId: createdBy, userName: createdByName,
       action: "create", entityType: "users", entityId: uid,
-      details: { name, email, roleIds, departmentIds }
+      details: { name, email, roleIds, departmentIds, isConsultant, specialty }
     });
 
     return { success: true, uid };
