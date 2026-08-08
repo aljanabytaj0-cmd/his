@@ -104,13 +104,20 @@
       <div class="card referral-card" data-visit-id="${v.id}">
         <div class="rc-top">
           <div><strong>${v.patientName}</strong> <span class="pid">${v.patientMRN || ""}</span></div>
-          <span class="badge badge-neutral">${v.priority === "critical" ? "🔴 حرج" : v.priority === "urgent" ? "🟠 مستعجل" : "عادي"}</span>
+          <div style="display:flex; gap:6px;">
+            ${v.isInsured ? `<span class="badge badge-neutral">🩺 مؤمَّن</span>` : ""}
+            <span class="badge badge-neutral">${v.priority === "critical" ? "🔴 حرج" : v.priority === "urgent" ? "🟠 مستعجل" : "عادي"}</span>
+          </div>
         </div>
         ${v.notes ? `<div class="sr-price" style="margin-bottom:10px;">${v.notes}</div>` : ""}
         <label class="field-label">اختر الخدمة المطلوبة من الكتالوج:</label>
         <div class="catalog-picker">
           ${catalog.length
-            ? catalog.map(c => `<button type="button" class="catalog-chip" data-catalog-id="${c.id}" data-visit-id="${v.id}">${c.name} — ${Number(c.defaultPrice).toLocaleString()} د.ع</button>`).join("")
+            ? catalog.map(c => {
+                const useInsurance = v.isInsured && Number(c.insurancePrice) > 0;
+                const chipPrice = useInsurance ? c.insurancePrice : c.defaultPrice;
+                return `<button type="button" class="catalog-chip" data-catalog-id="${c.id}" data-visit-id="${v.id}" data-use-insurance="${useInsurance}">${c.name}${useInsurance ? " (تأمين)" : ""} — ${Number(chipPrice).toLocaleString()} د.ع</button>`;
+              }).join("")
             : `<span class="sr-price">لا توجد خدمات بكتالوج هذا القسم بعد — أضفها من لوحة الأدمن أولاً</span>`}
         </div>
       </div>
@@ -121,6 +128,8 @@
         const visit = pending.find(v => v.id === chip.dataset.visitId);
         const cat = catalog.find(c => c.id === chip.dataset.catalogId);
         if (!visit || !cat) return;
+        const useInsurance = chip.dataset.useInsurance === "true";
+        const referral = (visit.referrals || []).find(r => r.departmentId === deptId && r.status === "pending");
         chip.disabled = true;
         const result = await addService({
           visitId: visit.id,
@@ -130,8 +139,10 @@
           departmentId: deptId,
           catalogServiceId: cat.id,
           serviceName: cat.name,
-          price: cat.defaultPrice,
-          skipPaymentGate: currentDept?.paymentModel === "deferred_tab"
+          price: useInsurance ? cat.insurancePrice : cat.defaultPrice,
+          skipPaymentGate: currentDept?.paymentModel === "deferred_tab",
+          isInsuredService: useInsurance,
+          insuranceCoveragePercent: referral?.insuranceCoveragePercent || 0
         }, currentActor);
 
         if (result.success) {
@@ -183,6 +194,7 @@
             <div>
               <div class="sr-name">${s.patientName} <span class="pid">${s.patientMRN || ""}</span></div>
               <div class="sr-price">${s.serviceName} — ${Number(s.finalPrice || s.price || 0).toLocaleString()} د.ع • ${fmtTime(s.createdAt)}</div>
+              ${s.isInsuredService ? `<div class="sr-price" style="margin-top:2px;">🩺 تأمين ${s.insuranceCoveragePercent}% — غطّى ${Number(s.insuranceCoveredAmount || 0).toLocaleString()} د.ع، والباقي على المريض</div>` : ""}
               ${s.result ? `<div class="sr-price" style="margin-top:4px;"><strong>النتيجة:</strong> ${s.result}</div>` : ""}
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
