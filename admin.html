@@ -172,8 +172,12 @@
                   <input type="text" class="input-field" id="c-name" required placeholder="مثال: CBC">
                 </div>
                 <div>
-                  <label class="field-label">السعر الافتراضي (د.ع)</label>
+                  <label class="field-label">السعر الطبيعي (د.ع)</label>
                   <input type="number" class="input-field" id="c-price" min="0" step="500" value="0">
+                </div>
+                <div>
+                  <label class="field-label">سعر مرضى التأمين الصحي (د.ع) — اتركه 0 لو ما ينطبق</label>
+                  <input type="number" class="input-field" id="c-insurance-price" min="0" step="500" value="0">
                 </div>
                 <div class="full">
                   <label class="chip-check"><input type="checkbox" id="c-requires-payment" checked> تتطلب دفعاً قبل التنفيذ</label>
@@ -201,7 +205,7 @@
     PERMISSIONS, getDepartments, addDepartment, updateDepartment,
     getRoles, saveRole, getCatalogByDepartment, addCatalogService, updateCatalogService
   } from "./assets/js/api/referenceData.js";
-  import { getUsers, createEmployee, setUserActive, sendPasswordReset } from "./assets/js/api/users.js";
+  import { getUsers, createEmployee, setUserActive, sendPasswordReset, updateConsultantInfo } from "./assets/js/api/users.js";
 
   let currentUser = null, currentUserProfile = null;
   let allRoles = [], allDepartments = [], allUsers = [];
@@ -290,6 +294,9 @@
           <div class="row-actions">
             ${consultantBadge}
             <span class="badge ${u.active ? "badge-success" : "badge-danger"}">${u.active ? "فعّال" : "معطّل"}</span>
+            <button class="btn btn-outline btn-sm" data-edit-consultant="${u.id}" data-current="${u.isConsultant ? "true" : "false"}" data-specialty="${u.specialty || ""}">
+              ${u.isConsultant ? "تعديل التخصص" : "🩺 اجعله استشارياً"}
+            </button>
             <button class="btn btn-outline btn-sm" data-reset="${u.email}">إعادة تعيين كلمة المرور</button>
             <button class="btn ${u.active ? "btn-danger" : "btn-primary"} btn-sm" data-toggle="${u.id}" data-active="${u.active}">
               ${u.active ? "تعطيل" : "تفعيل"}
@@ -315,6 +322,22 @@
         } catch (err) {
           showToast("تعذر الإرسال — تأكد من صحة البريد", true);
         }
+      });
+    });
+    listEl.querySelectorAll("[data-edit-consultant]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const isCurrentlyConsultant = btn.dataset.current === "true";
+        if (isCurrentlyConsultant) {
+          const newSpecialty = prompt("عدّل التخصص (اترك فاضي وأكّد لإلغاء صفة الاستشاري):", btn.dataset.specialty);
+          if (newSpecialty === null) return;
+          await updateConsultantInfo(btn.dataset.editConsultant, { isConsultant: !!newSpecialty.trim(), specialty: newSpecialty.trim() });
+        } else {
+          const specialty = prompt("اكتب تخصص الطبيب الاستشاري:", "");
+          if (!specialty || !specialty.trim()) { showToast("لازم تكتب التخصص", true); return; }
+          await updateConsultantInfo(btn.dataset.editConsultant, { isConsultant: true, specialty: specialty.trim() });
+        }
+        showToast("تم التحديث ✓");
+        loadUsers();
       });
     });
   }
@@ -480,7 +503,7 @@
       <div class="row-item">
         <div>
           <div class="r-title">${s.name}</div>
-          <div class="r-sub">${Number(s.defaultPrice).toLocaleString()} د.ع • ${s.requiresPayment ? "يتطلب دفعاً" : "لا يتطلب دفعاً"}</div>
+          <div class="r-sub">${Number(s.defaultPrice).toLocaleString()} د.ع${s.insurancePrice ? ` • تأمين: ${Number(s.insurancePrice).toLocaleString()} د.ع` : ""} • ${s.requiresPayment ? "يتطلب دفعاً" : "لا يتطلب دفعاً"}</div>
         </div>
         <button class="btn btn-outline btn-sm" data-toggle-catalog="${s.id}" data-active="${s.active !== false}">
           ${s.active !== false ? "تعطيل" : "تفعيل"}
@@ -506,6 +529,7 @@
         departmentId: deptId,
         name: document.getElementById("c-name").value.trim(),
         defaultPrice: document.getElementById("c-price").value,
+        insurancePrice: document.getElementById("c-insurance-price").value,
         requiresPayment: document.getElementById("c-requires-payment").checked
       });
       document.getElementById("add-catalog-form").reset();
