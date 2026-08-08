@@ -55,6 +55,10 @@ export async function renderSidebar(activeKey, profile) {
     !m.requiresPermission || (profile.permissions || []).includes(m.requiresPermission)
   );
 
+  if (profile.isConsultant) {
+    tailItems.unshift({ key: "consultant_queue", label: "طابور مرضاي", icon: "🩺", href: "consultant-queue.html" });
+  }
+
   function renderGroup(items) {
     return items.map(m => {
       const isActive = m.key === activeKey;
