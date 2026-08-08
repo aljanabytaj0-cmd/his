@@ -30,6 +30,10 @@
   .chip-check { display: flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 8px 12px; border: 1.5px solid var(--color-border); border-radius: 8px; cursor: pointer; }
   .chip-check.checked { border-color: var(--color-primary); background: var(--color-bg-alt); }
   .chip-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .doctor-picker-wrap { margin-top: 8px; padding: 12px 14px; border: 1.5px dashed var(--color-primary); border-radius: var(--radius-md); display: none; }
+  .doctor-picker-wrap.show { display: block; }
+  .doctor-picker-wrap select { max-width: 360px; }
 </style>
 </head>
 <body>
@@ -162,10 +166,12 @@
   import { createPatient, subscribeAllPatients } from "./assets/js/api/patients.js";
   import { createVisit } from "./assets/js/api/visits.js";
   import { getDepartments } from "./assets/js/api/referenceData.js";
+  import { getUsers } from "./assets/js/api/users.js";
 
   let currentUser = null, currentActor = null;
   let allPatients = [];
   let allDepartments = [];
+  let allConsultants = [];
   let selectedPatient = null;
 
   function showToast(msg, isError = false) {
@@ -261,19 +267,57 @@
   function renderReferralChecks() {
     document.getElementById("referral-checks").innerHTML = allDepartments
       .filter(d => d.active !== false)
-      .map(d => `<label class="chip-check"><input type="checkbox" value="${d.id}" data-name="${d.name}"> ${d.name}</label>`)
-      .join("");
+      .map(d => {
+        const needsDoctor = !!d.requiresDoctorAssignment;
+        return `
+        <div class="referral-check-item" data-dept-id="${d.id}">
+          <label class="chip-check"><input type="checkbox" value="${d.id}" data-name="${d.name}" data-requires-doctor="${needsDoctor}"> ${d.name}</label>
+          ${needsDoctor ? `
+            <div class="doctor-picker-wrap" data-doctor-wrap-for="${d.id}">
+              <label class="field-label">اختر الطبيب الاستشاري *</label>
+              <select class="input-field doctor-select" data-doctor-select-for="${d.id}">
+                <option value="">اختر طبيباً...</option>
+                ${allConsultants.map(c => `<option value="${c.id}" data-name="${c.name}">${c.name} — ${c.specialty || "بدون تخصص"}</option>`).join("")}
+              </select>
+              ${!allConsultants.length ? `<div class="sr-price" style="margin-top:6px;">لا يوجد أطباء استشاريون مسجّلون بعد — أضفهم من لوحة الأدمن أولاً</div>` : ""}
+            </div>` : ""}
+        </div>`;
+      }).join("");
 
-    document.querySelectorAll("#referral-checks input").forEach(cb => {
-      cb.addEventListener("change", () => cb.closest("label").classList.toggle("checked", cb.checked));
+    document.querySelectorAll("#referral-checks input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        cb.closest("label").classList.toggle("checked", cb.checked);
+        if (cb.dataset.requiresDoctor === "true") {
+          const wrap = document.querySelector(`[data-doctor-wrap-for="${cb.value}"]`);
+          if (wrap) wrap.classList.toggle("show", cb.checked);
+        }
+      });
     });
   }
 
   document.getElementById("visit-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!selectedPatient) return;
-    const checked = Array.from(document.querySelectorAll("#referral-checks input:checked"));
+    const checked = Array.from(document.querySelectorAll("#referral-checks input[type=checkbox]:checked"));
     if (!checked.length) { showToast("اختر قسماً واحداً على الأقل", true); return; }
+
+    // تحقق: أي قسم يتطلب اختيار طبيب لازم يكون محدد طبيب له
+    const referrals = [];
+    for (const cb of checked) {
+      const referral = { departmentId: cb.value, departmentName: cb.dataset.name };
+      if (cb.dataset.requiresDoctor === "true") {
+        const select = document.querySelector(`[data-doctor-select-for="${cb.value}"]`);
+        const doctorId = select ? select.value : "";
+        if (!doctorId) {
+          showToast(`اختر الطبيب الاستشاري لقسم "${cb.dataset.name}"`, true);
+          return;
+        }
+        const doctorName = select.options[select.selectedIndex].dataset.name;
+        referral.assignedDoctorId = doctorId;
+        referral.assignedDoctorName = doctorName;
+      }
+      referrals.push(referral);
+    }
 
     const dept = allDepartments.find(d => d.id === checked[0].value);
     const btn = document.getElementById("send-visit-btn");
@@ -285,7 +329,7 @@
       patientMRN: selectedPatient.mrn,
       visitType: document.getElementById("v-type").value,
       priority: document.getElementById("v-priority").value,
-      referrals: checked.map(cb => ({ departmentId: cb.value, departmentName: cb.dataset.name })),
+      referrals,
       notes: document.getElementById("v-notes").value.trim(),
       paymentModel: dept?.paymentModel || "per_service"
     }, currentActor);
@@ -293,7 +337,8 @@
     if (result.success) {
       showToast("تم إرسال الزيارة للأقسام المختارة ✓");
       document.getElementById("visit-form").reset();
-      document.querySelectorAll("#referral-checks label").forEach(l => l.classList.remove("checked"));
+      document.querySelectorAll("#referral-checks label.chip-check").forEach(l => l.classList.remove("checked"));
+      document.querySelectorAll(".doctor-picker-wrap").forEach(w => w.classList.remove("show"));
       selectedPatient = null;
       document.getElementById("visit-tab-btn").style.display = "none";
       switchTab("tab-search");
@@ -311,7 +356,11 @@
     renderSidebar("reception", profile);
 
     subscribeAllPatients((list) => { allPatients = list; });
-    getDepartments().then(list => { allDepartments = list; renderReferralChecks(); });
+    Promise.all([getDepartments(), getUsers()]).then(([depts, users]) => {
+      allDepartments = depts;
+      allConsultants = users.filter(u => u.isConsultant && u.active !== false);
+      renderReferralChecks();
+    });
   });
 </script>
 </body>
