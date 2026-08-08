@@ -102,10 +102,11 @@ export async function getCatalogByDepartment(departmentId) {
     .filter(s => s.departmentId === departmentId && s.active !== false);
 }
 
-export async function addCatalogService({ departmentId, name, defaultPrice, requiresPayment }) {
+export async function addCatalogService({ departmentId, name, defaultPrice, insurancePrice, requiresPayment }) {
   return addDoc(collection(db, "serviceCatalog"), {
     departmentId, name,
     defaultPrice: Number(defaultPrice) || 0,
+    insurancePrice: Number(insurancePrice) || 0,
     requiresPayment: requiresPayment !== false,
     active: true
   });
