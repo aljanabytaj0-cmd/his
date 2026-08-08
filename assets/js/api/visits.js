@@ -8,7 +8,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { record } from "./auditLog.js";
 
-export async function createVisit({ patientId, patientName, patientMRN, visitType, priority, referrals, notes, paymentModel }, actor) {
+export async function createVisit({ patientId, patientName, patientMRN, visitType, priority, referrals, notes, paymentModel, isInsured, insuranceType }, actor) {
   if (!referrals || !referrals.length) {
     return { success: false, errorCode: "INVALID_REFERRAL", message: "يجب تحديد قسم واحد على الأقل" };
   }
@@ -22,6 +22,8 @@ export async function createVisit({ patientId, patientName, patientMRN, visitTyp
       referrals: enrichedReferrals,
       referralDepartmentIds: referrals.map(r => r.departmentId),
       assignedDoctorIds: referrals.filter(r => r.assignedDoctorId).map(r => r.assignedDoctorId),
+      isInsured: !!isInsured,
+      insuranceType: isInsured ? (insuranceType || "") : "",
       paymentModel: paymentModel || "per_service",
       settlementStatus: "open",
       dischargedAt: null,
