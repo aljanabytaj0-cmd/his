@@ -30,6 +30,8 @@ export async function createPatient(input, actor) {
       chronicConditions: input.chronicConditions || "",
       insuranceProvider: input.insuranceProvider || "",
       insuranceNumber: input.insuranceNumber || "",
+      isInsured: !!input.isInsured,
+      insuranceType: input.isInsured ? (input.insuranceType || "") : "",
       nationality: input.nationality || "عراقي",
       notes: input.notes || "",
       active: true,
