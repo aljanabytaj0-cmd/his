@@ -34,6 +34,10 @@
   .doctor-picker-wrap { margin-top: 8px; padding: 12px 14px; border: 1.5px dashed var(--color-primary); border-radius: var(--radius-md); display: none; }
   .doctor-picker-wrap.show { display: block; }
   .doctor-picker-wrap select { max-width: 360px; }
+
+  .coverage-wrap { margin-top: 8px; padding: 10px 14px; border: 1.5px dashed var(--color-accent); border-radius: var(--radius-md); display: none; }
+  .coverage-wrap.show { display: block; }
+  .coverage-wrap input { max-width: 140px; }
 </style>
 </head>
 <body>
@@ -108,8 +112,26 @@
             <div class="grid-3">
               <div><label class="field-label">الحساسية</label><input type="text" class="input-field" id="p-allergies" placeholder="مثال: بنسلين"></div>
               <div><label class="field-label">الأمراض المزمنة</label><input type="text" class="input-field" id="p-chronic"></div>
-              <div><label class="field-label">شركة التأمين</label><input type="text" class="input-field" id="p-insurance"></div>
-              <div><label class="field-label">رقم التأمين</label><input type="text" class="input-field" id="p-insurance-num"></div>
+              <div class="full">
+                <label class="chip-check" style="display:inline-flex;">
+                  <input type="checkbox" id="p-is-insured"> مريض تأمين صحي
+                </label>
+              </div>
+              <div id="p-insurance-details-wrap" style="display:none;" class="full">
+                <div class="grid-3">
+                  <div>
+                    <label class="field-label">نوع التأمين *</label>
+                    <select class="input-field" id="p-insurance-type">
+                      <option value="">اختر...</option>
+                      <option value="governmental">الضمان الصحي الحكومي</option>
+                      <option value="interior">وزارة الداخلية</option>
+                      <option value="other">أخرى</option>
+                    </select>
+                  </div>
+                  <div><label class="field-label">شركة/جهة التأمين</label><input type="text" class="input-field" id="p-insurance"></div>
+                  <div><label class="field-label">رقم التأمين</label><input type="text" class="input-field" id="p-insurance-num"></div>
+                </div>
+              </div>
               <div class="full"><label class="field-label">ملاحظات عامة</label><textarea class="input-field" id="p-notes" rows="2"></textarea></div>
             </div>
 
@@ -215,17 +237,34 @@
   function selectPatient(patient) {
     selectedPatient = patient;
     document.getElementById("visit-tab-btn").style.display = "inline-block";
+    const insuranceTypeLabels = { governmental: "الضمان الصحي الحكومي", interior: "وزارة الداخلية", other: "تأمين آخر" };
     document.getElementById("selected-patient-card").innerHTML = `
       <div><strong>${patient.name}</strong> <span class="pid">${patient.mrn}</span></div>
-      <span class="badge badge-neutral">${patient.phone || "بدون هاتف"}</span>
+      <div style="display:flex; gap:8px;">
+        ${patient.isInsured ? `<span class="badge badge-neutral">🩺 ${insuranceTypeLabels[patient.insuranceType] || "مؤمَّن"}</span>` : ""}
+        <span class="badge badge-neutral">${patient.phone || "بدون هاتف"}</span>
+      </div>
     `;
     switchTab("tab-visit");
+    updateCoverageVisibility();
   }
+
+  document.getElementById("p-is-insured").addEventListener("change", (e) => {
+    document.getElementById("p-insurance-details-wrap").style.display = e.target.checked ? "block" : "none";
+  });
 
   // ============ تسجيل مريض جديد ============
   document.getElementById("register-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = document.getElementById("register-btn");
+
+    const isInsured = document.getElementById("p-is-insured").checked;
+    const insuranceType = document.getElementById("p-insurance-type").value;
+    if (isInsured && !insuranceType) {
+      showToast("اختر نوع التأمين", true);
+      return;
+    }
+
     btn.disabled = true; btn.textContent = "جارِ الحفظ...";
 
     const result = await createPatient({
@@ -245,6 +284,7 @@
       bloodType: document.getElementById("p-blood").value,
       allergies: document.getElementById("p-allergies").value.trim(),
       chronicConditions: document.getElementById("p-chronic").value.trim(),
+      isInsured, insuranceType,
       insuranceProvider: document.getElementById("p-insurance").value.trim(),
       insuranceNumber: document.getElementById("p-insurance-num").value.trim(),
       notes: document.getElementById("p-notes").value.trim()
@@ -253,10 +293,11 @@
     if (result.success) {
       showToast(`تم إنشاء الملف بنجاح — رقم الملف: ${result.mrn} ✓`);
       document.getElementById("register-form").reset();
+      document.getElementById("p-insurance-details-wrap").style.display = "none";
       const newPatient = await new Promise(resolve => {
         const unsub = subscribeAllPatients(list => { unsub(); resolve(list.find(p => p.id === result.patientId)); });
       });
-      selectPatient(newPatient || { id: result.patientId, name: document.getElementById("p-name").value, mrn: result.mrn });
+      selectPatient(newPatient || { id: result.patientId, name: document.getElementById("p-name").value, mrn: result.mrn, isInsured, insuranceType });
     } else {
       showToast(result.message, true);
     }
@@ -281,6 +322,10 @@
               </select>
               ${!allConsultants.length ? `<div class="sr-price" style="margin-top:6px;">لا يوجد أطباء استشاريون مسجّلون بعد — أضفهم من لوحة الأدمن أولاً</div>` : ""}
             </div>` : ""}
+          <div class="coverage-wrap" data-coverage-wrap-for="${d.id}">
+            <label class="field-label">نسبة تغطية التأمين لهذا القسم (%) *</label>
+            <input type="number" class="input-field coverage-input" data-coverage-input-for="${d.id}" min="0" max="100" step="5" placeholder="مثال: 75">
+          </div>
         </div>`;
       }).join("");
 
@@ -291,7 +336,17 @@
           const wrap = document.querySelector(`[data-doctor-wrap-for="${cb.value}"]`);
           if (wrap) wrap.classList.toggle("show", cb.checked);
         }
+        updateCoverageVisibility();
       });
+    });
+  }
+
+  function updateCoverageVisibility() {
+    const insured = !!(selectedPatient && selectedPatient.isInsured);
+    document.querySelectorAll(".coverage-wrap").forEach(w => {
+      const deptId = w.dataset.coverageWrapFor;
+      const cb = document.querySelector(`#referral-checks input[value="${deptId}"]`);
+      w.classList.toggle("show", insured && !!(cb && cb.checked));
     });
   }
 
@@ -301,7 +356,7 @@
     const checked = Array.from(document.querySelectorAll("#referral-checks input[type=checkbox]:checked"));
     if (!checked.length) { showToast("اختر قسماً واحداً على الأقل", true); return; }
 
-    // تحقق: أي قسم يتطلب اختيار طبيب لازم يكون محدد طبيب له
+    // تحقق: أي قسم يتطلب اختيار طبيب لازم يكون محدد طبيب له + نسبة التغطية لو المريض مؤمَّن
     const referrals = [];
     for (const cb of checked) {
       const referral = { departmentId: cb.value, departmentName: cb.dataset.name };
@@ -315,6 +370,15 @@
         const doctorName = select.options[select.selectedIndex].dataset.name;
         referral.assignedDoctorId = doctorId;
         referral.assignedDoctorName = doctorName;
+      }
+      if (selectedPatient.isInsured) {
+        const coverageInput = document.querySelector(`[data-coverage-input-for="${cb.value}"]`);
+        const coverageVal = coverageInput ? coverageInput.value : "";
+        if (coverageVal === "" || Number(coverageVal) < 0 || Number(coverageVal) > 100) {
+          showToast(`اكتب نسبة تغطية التأمين (0-100) لقسم "${cb.dataset.name}"`, true);
+          return;
+        }
+        referral.insuranceCoveragePercent = Number(coverageVal);
       }
       referrals.push(referral);
     }
@@ -331,7 +395,9 @@
       priority: document.getElementById("v-priority").value,
       referrals,
       notes: document.getElementById("v-notes").value.trim(),
-      paymentModel: dept?.paymentModel || "per_service"
+      paymentModel: dept?.paymentModel || "per_service",
+      isInsured: !!selectedPatient.isInsured,
+      insuranceType: selectedPatient.insuranceType || ""
     }, currentActor);
 
     if (result.success) {
@@ -339,6 +405,7 @@
       document.getElementById("visit-form").reset();
       document.querySelectorAll("#referral-checks label.chip-check").forEach(l => l.classList.remove("checked"));
       document.querySelectorAll(".doctor-picker-wrap").forEach(w => w.classList.remove("show"));
+      document.querySelectorAll(".coverage-wrap").forEach(w => w.classList.remove("show"));
       selectedPatient = null;
       document.getElementById("visit-tab-btn").style.display = "none";
       switchTab("tab-search");
