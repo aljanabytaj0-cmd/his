@@ -55,6 +55,13 @@ export async function updateUserRolesAndDepartments(uid, { roleIds, departmentId
   await updateDoc(doc(db, "users", uid), { roleIds, departmentIds });
 }
 
+export async function updateConsultantInfo(uid, { isConsultant, specialty }) {
+  await updateDoc(doc(db, "users", uid), {
+    isConsultant: !!isConsultant,
+    specialty: isConsultant ? (specialty || "") : ""
+  });
+}
+
 export async function setUserActive(uid, active, { changedBy, changedByName }) {
   await updateDoc(doc(db, "users", uid), { active });
   await record({
