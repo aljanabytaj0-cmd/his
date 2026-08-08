@@ -21,7 +21,8 @@ export const SERVICE_STATUS = {
 };
 
 // إضافة خدمة لزيارة — فقط من قسم مُحوَّل له المريض ضمن visit.referrals
-export async function addService({ visitId, patientId, patientName, patientMRN, departmentId, catalogServiceId, serviceName, price, skipPaymentGate }, actor) {
+// assignedDoctorId/assignedDoctorName اختياريان: تُمرَّران فقط من صفحة طابور الطبيب الاستشاري
+export async function addService({ visitId, patientId, patientName, patientMRN, departmentId, catalogServiceId, serviceName, price, skipPaymentGate, assignedDoctorId, assignedDoctorName }, actor) {
   try {
     const docRef = await addDoc(collection(db, "services"), {
       visitId, patientId, patientName, patientMRN,
@@ -30,6 +31,8 @@ export async function addService({ visitId, patientId, patientName, patientMRN, 
       discount: 0, finalPrice: Number(price) || 0,
       status: "waiting_for_payment",
       skipPaymentGate: !!skipPaymentGate,
+      assignedDoctorId: assignedDoctorId || null,
+      assignedDoctorName: assignedDoctorName || "",
       result: "",
       requestedBy: actor?.uid || null,
       requestedByName: actor?.name || "",
@@ -79,6 +82,16 @@ export function subscribeDepartmentServices(departmentId, callback) {
 
 export function subscribeVisitServices(visitId, callback) {
   const q = query(collection(db, "services"), where("visitId", "==", visitId), orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+// اشتراك حي بكل خدمات طبيب استشاري معيّن (طابوره الشخصي فقط) — يحتاج Composite Index (departmentId + assignedDoctorId + createdAt)
+export function subscribeConsultantServices(doctorId, callback) {
+  const q = query(
+    collection(db, "services"),
+    where("assignedDoctorId", "==", doctorId),
+    orderBy("createdAt", "desc")
+  );
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
