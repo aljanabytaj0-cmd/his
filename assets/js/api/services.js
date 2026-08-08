@@ -22,13 +22,22 @@ export const SERVICE_STATUS = {
 
 // إضافة خدمة لزيارة — فقط من قسم مُحوَّل له المريض ضمن visit.referrals
 // assignedDoctorId/assignedDoctorName اختياريان: تُمرَّران فقط من صفحة طابور الطبيب الاستشاري
-export async function addService({ visitId, patientId, patientName, patientMRN, departmentId, catalogServiceId, serviceName, price, skipPaymentGate, assignedDoctorId, assignedDoctorName }, actor) {
+// isInsuredService/insuranceCoveragePercent: لو المريض مؤمَّن، يُخصم مبلغ التغطية تلقائياً من السعر (price هنا هو سعر التأمين المحدد بالكتالوج لو موجود)
+export async function addService({ visitId, patientId, patientName, patientMRN, departmentId, catalogServiceId, serviceName, price, skipPaymentGate, assignedDoctorId, assignedDoctorName, isInsuredService, insuranceCoveragePercent }, actor) {
   try {
+    const basePrice = Number(price) || 0;
+    const coveragePercent = isInsuredService ? (Number(insuranceCoveragePercent) || 0) : 0;
+    const insuranceCoveredAmount = isInsuredService ? Math.round(basePrice * coveragePercent / 100) : 0;
+    const finalPrice = basePrice - insuranceCoveredAmount;
+
     const docRef = await addDoc(collection(db, "services"), {
       visitId, patientId, patientName, patientMRN,
       departmentId, catalogServiceId,
-      serviceName, price: Number(price) || 0,
-      discount: 0, finalPrice: Number(price) || 0,
+      serviceName, price: basePrice,
+      isInsuredService: !!isInsuredService,
+      insuranceCoveragePercent: coveragePercent,
+      insuranceCoveredAmount,
+      discount: 0, finalPrice,
       status: "waiting_for_payment",
       skipPaymentGate: !!skipPaymentGate,
       assignedDoctorId: assignedDoctorId || null,
