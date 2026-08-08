@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>لوحة التحكم — نظام إدارة المستشفى</title>
+<title>الرئيسية — نظام إدارة المستشفى</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/style.css">
@@ -50,6 +50,46 @@
   }
   .welcome-banner h2 { color: #fff; font-size: 19px; position: relative; }
   .welcome-banner p { margin: 6px 0 0; font-size: 13.5px; color: rgba(255,255,255,0.65); position: relative; }
+
+  /* ===== شبكة أيقونات الأقسام — ستايل همسة ===== */
+  .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .section-heading h3 { font-size: 15px; }
+  .section-heading .hint { font-size: 12px; color: var(--color-text-muted); }
+
+  .dept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .dept-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 8px 14px;
+    text-decoration: none;
+    text-align: center;
+    background: var(--color-surface);
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-lg, 14px);
+    transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+  }
+  .dept-tile:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-3px);
+    border-color: var(--color-primary);
+  }
+  .dept-tile .dt-icon {
+    width: 56px; height: 56px;
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+    background: var(--color-bg-alt);
+  }
+  .dept-tile.emergency .dt-icon { background: #FDECEC; }
+  .dept-tile .dt-label { font-size: 12.5px; font-weight: 700; color: var(--color-text); line-height: 1.35; }
+  .dept-tile .dt-tag { font-size: 10px; color: var(--color-text-muted); }
 
   .modules-grid {
     display: grid;
@@ -107,7 +147,15 @@
         </div>
       </div>
 
-      <h3 style="margin-bottom:14px;font-size:15px;">الوحدات</h3>
+      <div class="section-heading">
+        <h3>الأقسام الطبية</h3>
+        <span class="hint">اضغط على أي قسم لفتح طابوره مباشرة</span>
+      </div>
+      <div class="dept-grid" id="dept-grid">
+        <div class="empty-state" style="grid-column:1/-1;">جارِ تحميل الأقسام...</div>
+      </div>
+
+      <h3 style="margin-bottom:14px;font-size:15px;">وحدات عامة</h3>
       <div class="modules-grid" id="modules-grid"></div>
     </main>
   </div>
@@ -116,20 +164,39 @@
 <script type="module">
   import { requireAuth } from "./assets/js/auth.js";
   import { renderSidebar } from "./assets/js/sidebar.js";
+  import { getDepartments } from "./assets/js/api/referenceData.js";
   import { db } from "./assets/js/firebase-config.js";
   import { collection, getCountFromServer, query, where, Timestamp }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+  // وحدات عامة غير مرتبطة بقسم سريري محدد
   const MODULE_CARDS = [
-    { key: "patients", icon: "🩺", title: "المرضى والملفات الطبية", href: "patients.html", ready: true },
     { key: "appointments", icon: "📅", title: "المواعيد والحجوزات", href: "#", ready: false },
-    { key: "emergency", icon: "🛏", title: "الطوارئ والأسرّة", href: "#", ready: false },
-    { key: "pharmacy", icon: "💊", title: "الصيدلية", href: "department-queue.html?dept=pharmacy", ready: true },
-    { key: "lab", icon: "🧪", title: "المختبر والأشعة", href: "department-queue.html?dept=lab,radiology", ready: true },
     { key: "billing", icon: "💳", title: "الفوترة والحسابات", href: "#", ready: false },
     { key: "hr", icon: "👥", title: "الموارد البشرية", href: "#", ready: false },
     { key: "reports", icon: "📊", title: "التقارير الشهرية", href: "#", ready: false },
   ];
+
+  // تحديد أيقونة مناسبة لكل قسم حسب اسمه (مطابقة جزئية) — ستايل همسة
+  const NAME_ICON_RULES = [
+    [/طوار/, "🚑"], [/عناية.*مركز|I\.?C\.?U/i, "🫀"], [/حديث.*ولاد|N-?ICU/i, "👶"],
+    [/إسعاف|اسعاف/, "🚑"], [/استشار/, "🩺"], [/تمريض/, "💉"],
+    [/مختبر/, "🧪"], [/أشعة.*سيني|X-?ray/i, "📷"], [/مفراس|CT/i, "🩻"],
+    [/رنين|MRI/i, "🧲"], [/سونار|Ultrasound/i, "🔊"], [/دوبلر|Doppler/i, "〰️"],
+    [/إيكو|ايكو|Echo/i, "❤️"], [/بنك.*دم|Blood/i, "🩸"],
+    [/عمليات.*جراح|Surger/i, "🔪"], [/إجراءات.*مالي/, "💰"],
+    [/غرف|Room/i, "🛏"], [/خدج|Premature/i, "🍼"], [/علاج.*طبيعي|Physical/i, "🏃"],
+    [/صيدلي|Pharmacy/i, "💊"], [/تغذي|Nutrition/i, "🍽"],
+    [/أنف.*أذن.*حنجرة|ENT/i, "👂"], [/كوزمتك|تجميل|Cosmetic/i, "✨"],
+    [/أسنان|Dental/i, "🦷"], [/عيون|Eye/i, "👁"], [/جلدي|Derm/i, "🧴"],
+    [/عظام|Ortho/i, "🦴"], [/أعصاب|Neuro/i, "🧠"], [/قلب|Cardio/i, "❤️"],
+  ];
+  const DEPT_TYPE_FALLBACK = { clinical: "🏥", financial: "💳", administrative: "🗂️" };
+
+  function iconForDept(d) {
+    const match = NAME_ICON_RULES.find(([re]) => re.test(d.name));
+    return match ? match[1] : (DEPT_TYPE_FALLBACK[d.type] || "🏬");
+  }
 
   requireAuth(async ({ profile }) => {
     renderSidebar("dashboard", profile);
@@ -138,9 +205,38 @@
       weekday: "long", year: "numeric", month: "long", day: "numeric"
     });
 
-    // بناء بطاقات الوحدات
-    const grid = document.getElementById("modules-grid");
-    grid.innerHTML = MODULE_CARDS.map(m => {
+    // ===== شبكة أيقونات الأقسام =====
+    try {
+      const departments = await getDepartments();
+      const visibleDepts = departments.filter(d => {
+        if (d.active === false) return false;
+        if (profile.hasAllDepartments) return true;
+        return (profile.departmentIds || []).includes(d.id);
+      });
+
+      const grid = document.getElementById("dept-grid");
+      if (!visibleDepts.length) {
+        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;">ماكو أقسام مرتبطة بحسابك — راجع الأدمن</div>`;
+      } else {
+        grid.innerHTML = visibleDepts.map(d => {
+          const href = d.requiresDoctorAssignment ? "consultant-queue.html" : `department-queue-v2.html?dept=${d.id}`;
+          const isEmergency = d.paymentModel === "deferred_tab";
+          return `
+            <a class="dept-tile ${isEmergency ? "emergency" : ""}" href="${href}">
+              <div class="dt-icon">${iconForDept(d)}</div>
+              <div class="dt-label">${d.name}</div>
+              ${isEmergency ? `<div class="dt-tag">🚨 حساب مفتوح</div>` : ""}
+            </a>`;
+        }).join("");
+      }
+    } catch (err) {
+      console.error("تعذر تحميل الأقسام:", err);
+      document.getElementById("dept-grid").innerHTML = `<div class="empty-state" style="grid-column:1/-1;">تعذر تحميل الأقسام</div>`;
+    }
+
+    // ===== بطاقات الوحدات العامة =====
+    const modulesGrid = document.getElementById("modules-grid");
+    modulesGrid.innerHTML = MODULE_CARDS.map(m => {
       const locked = !m.ready;
       return `
         <a class="card module-card ${locked ? "locked" : ""}" href="${locked ? "#" : m.href}">
@@ -152,7 +248,7 @@
         </a>`;
     }).join("");
 
-    // إحصائيات حية من Firestore
+    // ===== إحصائيات حية من Firestore =====
     try {
       const patientsCol = collection(db, "patients");
       const totalSnap = await getCountFromServer(patientsCol);
@@ -164,8 +260,8 @@
       const todaySnap = await getCountFromServer(todayQuery);
       document.getElementById("stat-patients-today").textContent = todaySnap.data().count;
 
-      const employeesSnap = await getCountFromServer(collection(db, "employees"));
-      document.getElementById("stat-employees").textContent = employeesSnap.data().count;
+      const usersSnap = await getCountFromServer(collection(db, "users"));
+      document.getElementById("stat-employees").textContent = usersSnap.data().count;
     } catch (err) {
       console.error("تعذر تحميل الإحصائيات:", err);
     }
