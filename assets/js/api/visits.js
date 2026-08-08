@@ -21,6 +21,7 @@ export async function createVisit({ patientId, patientName, patientMRN, visitTyp
       status: "sent",
       referrals: enrichedReferrals,
       referralDepartmentIds: referrals.map(r => r.departmentId),
+      assignedDoctorIds: referrals.filter(r => r.assignedDoctorId).map(r => r.assignedDoctorId),
       paymentModel: paymentModel || "per_service",
       settlementStatus: "open",
       dischargedAt: null,
@@ -49,7 +50,10 @@ export async function addReferral(visitId, referral, actor) {
   }
   const referrals = [...(visit.referrals || []), { ...referral, sentAt: new Date().toISOString(), status: "pending" }];
   const referralDepartmentIds = [...(visit.referralDepartmentIds || []), referral.departmentId];
-  await updateDoc(doc(db, "visits", visitId), { referrals, referralDepartmentIds });
+  const assignedDoctorIds = referral.assignedDoctorId
+    ? [...(visit.assignedDoctorIds || []), referral.assignedDoctorId]
+    : (visit.assignedDoctorIds || []);
+  await updateDoc(doc(db, "visits", visitId), { referrals, referralDepartmentIds, assignedDoctorIds });
   await record({
     userId: actor?.uid, userName: actor?.name,
     action: "update", entityType: "visits", entityId: visitId,
@@ -104,14 +108,27 @@ export function subscribeDepartmentReferrals(departmentId, callback) {
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
+// اشتراك حي بكل الزيارات المُحالة لطبيب استشاري معيّن (تُستخدم بصفحة طابور الطبيب الشخصي)
+export function subscribeConsultantReferrals(doctorId, callback) {
+  const q = query(
+    collection(db, "visits"),
+    where("assignedDoctorIds", "array-contains", doctorId),
+    orderBy("createdAt", "desc")
+  );
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
 // يُستدعى بعد إضافة أول خدمة من قسم معيّن على تحويل، لتعليمه "مستلم" فيختفي من قائمة "بانتظار الاستلام"
-export async function markReferralReceived(visitId, departmentId) {
+// assignedDoctorId اختياري: لو مررناه، يطابق فقط التحويل الخاص بهذا الطبيب بالذات (حالة قسم الاستشارية اللي فيه أكثر من طبيب لنفس القسم بنفس الزيارة)
+export async function markReferralReceived(visitId, departmentId, assignedDoctorId = null) {
   const visitSnap = await getDoc(doc(db, "visits", visitId));
   if (!visitSnap.exists()) return;
   const visit = visitSnap.data();
-  const referrals = (visit.referrals || []).map(r =>
-    r.departmentId === departmentId && r.status === "pending" ? { ...r, status: "received" } : r
-  );
+  const referrals = (visit.referrals || []).map(r => {
+    const deptMatch = r.departmentId === departmentId && r.status === "pending";
+    const doctorMatch = assignedDoctorId ? r.assignedDoctorId === assignedDoctorId : true;
+    return (deptMatch && doctorMatch) ? { ...r, status: "received" } : r;
+  });
   await updateDoc(doc(db, "visits", visitId), { referrals });
 }
 
