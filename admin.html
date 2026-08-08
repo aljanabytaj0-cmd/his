@@ -76,6 +76,15 @@
                 <div class="chip-group" id="u-depts-checks"></div>
               </div>
               <div class="full">
+                <label class="chip-check" style="display:inline-flex;">
+                  <input type="checkbox" id="u-is-consultant"> طبيب استشاري (له طابور مرضاه الشخصي)
+                </label>
+              </div>
+              <div class="full" id="u-specialty-wrap" style="display:none;">
+                <label class="field-label">التخصص *</label>
+                <input type="text" class="input-field" id="u-specialty" placeholder="مثال: باطنية">
+              </div>
+              <div class="full">
                 <button type="submit" class="btn btn-primary" id="add-user-btn">إنشاء الحساب</button>
               </div>
             </div>
@@ -130,6 +139,11 @@
                   <option value="per_service">دفع لكل خدمة (الوضع الطبيعي)</option>
                   <option value="deferred_tab">حساب مفتوح — تصفية عند الخروج (الطوارئ)</option>
                 </select>
+              </div>
+              <div class="full">
+                <label class="chip-check" style="display:inline-flex;">
+                  <input type="checkbox" id="d-requires-doctor"> قسم استشارية (يتطلب اختيار طبيب معيّن عند التحويل، وله طابور شخصي لكل طبيب)
+                </label>
               </div>
               <div class="full">
                 <button type="submit" class="btn btn-primary">حفظ القسم</button>
@@ -217,9 +231,21 @@
     ).join("");
   }
 
+  document.getElementById("u-is-consultant").addEventListener("change", (e) => {
+    document.getElementById("u-specialty-wrap").style.display = e.target.checked ? "block" : "none";
+  });
+
   document.getElementById("add-user-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = document.getElementById("add-user-btn");
+
+    const isConsultant = document.getElementById("u-is-consultant").checked;
+    const specialty = document.getElementById("u-specialty").value.trim();
+    if (isConsultant && !specialty) {
+      showToast("لازم تكتب التخصص للطبيب الاستشاري", true);
+      return;
+    }
+
     btn.disabled = true; btn.textContent = "جارِ الإنشاء...";
 
     const roleIds = Array.from(document.querySelectorAll("#u-roles-checks input:checked")).map(i => i.value);
@@ -230,12 +256,14 @@
       email: document.getElementById("u-email").value.trim(),
       password: document.getElementById("u-password").value,
       roleIds, departmentIds,
+      isConsultant, specialty,
       createdBy: currentUser?.uid, createdByName: currentUserProfile?.name
     });
 
     if (result.success) {
       showToast("تم إنشاء الحساب بنجاح ✓");
       document.getElementById("add-user-form").reset();
+      document.getElementById("u-specialty-wrap").style.display = "none";
       loadUsers();
     } else {
       showToast(result.message, true);
@@ -252,6 +280,7 @@
     listEl.innerHTML = allUsers.map(u => {
       const roleNames = (u.roleIds || []).map(id => allRoles.find(r => r.id === id)?.name || id).join("، ") || "بدون دور";
       const deptNames = (u.departmentIds || []).map(id => allDepartments.find(d => d.id === id)?.name || id).join("، ") || "بدون قسم";
+      const consultantBadge = u.isConsultant ? `<span class="badge badge-neutral">🩺 استشاري — ${u.specialty || "بدون تخصص"}</span>` : "";
       return `
         <div class="row-item">
           <div>
@@ -259,6 +288,7 @@
             <div class="r-sub">${roleNames} • ${deptNames}</div>
           </div>
           <div class="row-actions">
+            ${consultantBadge}
             <span class="badge ${u.active ? "badge-success" : "badge-danger"}">${u.active ? "فعّال" : "معطّل"}</span>
             <button class="btn btn-outline btn-sm" data-reset="${u.email}">إعادة تعيين كلمة المرور</button>
             <button class="btn ${u.active ? "btn-danger" : "btn-primary"} btn-sm" data-toggle="${u.id}" data-active="${u.active}">
@@ -370,11 +400,14 @@
     listEl.innerHTML = allDepartments.map(d => `
       <div class="row-item">
         <div>
-          <div class="r-title">${d.name}</div>
+          <div class="r-title">${d.name} ${d.requiresDoctorAssignment ? '<span class="badge badge-neutral">🩺 استشارية</span>' : ""}</div>
           <div class="r-sub">${typeLabels[d.type] || d.type} • ${d.paymentModel === "deferred_tab" ? "حساب مفتوح (طوارئ)" : "دفع لكل خدمة"}</div>
         </div>
         <div class="row-actions">
           <span class="badge ${d.active !== false ? "badge-success" : "badge-danger"}">${d.active !== false ? "فعّال" : "معطّل"}</span>
+          <button class="btn btn-outline btn-sm" data-toggle-consult="${d.id}" data-val="${d.requiresDoctorAssignment ? "true" : "false"}">
+            ${d.requiresDoctorAssignment ? "إلغاء وضع الاستشارية" : "🩺 اجعله قسم استشارية"}
+          </button>
           <button class="btn ${d.active !== false ? "btn-danger" : "btn-primary"} btn-sm" data-toggle-dept="${d.id}" data-active="${d.active !== false}">
             ${d.active !== false ? "تعطيل" : "تفعيل"}
           </button>
@@ -389,6 +422,13 @@
         loadDepartments();
       });
     });
+    listEl.querySelectorAll("[data-toggle-consult]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await updateDepartment(btn.dataset.toggleConsult, { requiresDoctorAssignment: btn.dataset.val !== "true" });
+        showToast("تم التحديث");
+        loadDepartments();
+      });
+    });
   }
 
   document.getElementById("add-dept-form").addEventListener("submit", async (e) => {
@@ -397,7 +437,8 @@
       await addDepartment({
         name: document.getElementById("d-name").value.trim(),
         type: document.getElementById("d-type").value,
-        paymentModel: document.getElementById("d-payment-model").value
+        paymentModel: document.getElementById("d-payment-model").value,
+        requiresDoctorAssignment: document.getElementById("d-requires-doctor").checked
       });
       document.getElementById("add-dept-form").reset();
       showToast("تم إضافة القسم ✓");
