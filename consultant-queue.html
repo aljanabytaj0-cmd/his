@@ -25,6 +25,12 @@
   .catalog-picker { display: flex; gap: 8px; flex-wrap: wrap; }
   .catalog-chip { padding: 8px 14px; border-radius: 18px; border: 1.5px solid var(--color-border); font-size: 12.5px; font-weight: 700; background: var(--color-surface); cursor: pointer; }
   .catalog-chip:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+  .order-entry-wrap { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
+  .order-entry-panel { display: none; margin-top: 10px; padding: 12px 14px; border: 1.5px dashed var(--color-primary); border-radius: var(--radius-md); }
+  .order-entry-panel.show { display: block; }
+  .order-dept-checks { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .order-coverage-input { max-width: 140px; margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -65,7 +71,7 @@
   import { renderSidebar } from "./assets/js/sidebar.js";
   import { SERVICE_STATUS, subscribeConsultantServices, addService, updateServiceStatus } from "./assets/js/api/services.js";
   import { getDepartments, getCatalogByDepartment } from "./assets/js/api/referenceData.js";
-  import { subscribeConsultantReferrals, markReferralReceived } from "./assets/js/api/visits.js";
+  import { subscribeConsultantReferrals, markReferralReceived, addReferral } from "./assets/js/api/visits.js";
   import { requestApproval } from "./assets/js/api/approvals.js";
 
   let currentActor = null;
@@ -73,7 +79,10 @@
   let consultDept = null; // القسم اللي فيه requiresDoctorAssignment === true
   let catalog = [];
   let allServices = [];
+  let allDepartments = [];
+  let allMyVisits = []; // كل زياراتي (بغض النظر عن حالة التحويل) — لمعرفة حالة التأمين ولطلب خدمات إضافية
   let activeFilter = "all";
+  const ORDERABLE_TYPES = ["clinical"]; // الأقسام اللي يقدر الطبيب يطلب منها خدمة إضافية
 
   function showToast(msg, isError = false) {
     const t = document.getElementById("toast");
@@ -107,13 +116,20 @@
       <div class="card referral-card" data-visit-id="${v.id}">
         <div class="rc-top">
           <div><strong>${v.patientName}</strong> <span class="pid">${v.patientMRN || ""}</span></div>
-          <span class="badge badge-neutral">${v.priority === "critical" ? "🔴 حرج" : v.priority === "urgent" ? "🟠 مستعجل" : "عادي"}</span>
+          <div style="display:flex; gap:6px;">
+            ${v.isInsured ? `<span class="badge badge-neutral">🩺 مؤمَّن</span>` : ""}
+            <span class="badge badge-neutral">${v.priority === "critical" ? "🔴 حرج" : v.priority === "urgent" ? "🟠 مستعجل" : "عادي"}</span>
+          </div>
         </div>
         ${v.notes ? `<div class="sr-price" style="margin-bottom:10px;">${v.notes}</div>` : ""}
         <label class="field-label">اختر نوع الكشفية من الكتالوج:</label>
         <div class="catalog-picker">
           ${catalog.length
-            ? catalog.map(c => `<button type="button" class="catalog-chip" data-catalog-id="${c.id}" data-visit-id="${v.id}">${c.name} — ${Number(c.defaultPrice).toLocaleString()} د.ع</button>`).join("")
+            ? catalog.map(c => {
+                const useInsurance = v.isInsured && Number(c.insurancePrice) > 0;
+                const chipPrice = useInsurance ? c.insurancePrice : c.defaultPrice;
+                return `<button type="button" class="catalog-chip" data-catalog-id="${c.id}" data-visit-id="${v.id}" data-use-insurance="${useInsurance}">${c.name}${useInsurance ? " (تأمين)" : ""} — ${Number(chipPrice).toLocaleString()} د.ع</button>`;
+              }).join("")
             : `<span class="sr-price">لا توجد خدمات بكتالوج الاستشارية بعد — أضفها من لوحة الأدمن أولاً</span>`}
         </div>
       </div>
@@ -124,6 +140,8 @@
         const visit = pending.find(v => v.id === chip.dataset.visitId);
         const cat = catalog.find(c => c.id === chip.dataset.catalogId);
         if (!visit || !cat) return;
+        const useInsurance = chip.dataset.useInsurance === "true";
+        const referral = (visit.referrals || []).find(r => r.departmentId === consultDept.id && r.assignedDoctorId === currentActor.uid && r.status === "pending");
         chip.disabled = true;
         const result = await addService({
           visitId: visit.id,
@@ -133,10 +151,12 @@
           departmentId: consultDept.id,
           catalogServiceId: cat.id,
           serviceName: cat.name,
-          price: cat.defaultPrice,
+          price: useInsurance ? cat.insurancePrice : cat.defaultPrice,
           skipPaymentGate: consultDept.paymentModel === "deferred_tab",
           assignedDoctorId: currentActor.uid,
-          assignedDoctorName: currentActor.name
+          assignedDoctorName: currentActor.name,
+          isInsuredService: useInsurance,
+          insuranceCoveragePercent: referral?.insuranceCoveragePercent || 0
         }, currentActor);
 
         if (result.success) {
@@ -165,6 +185,10 @@
     container.innerHTML = list.map(s => {
       const st = SERVICE_STATUS[s.status] || { label: s.status, badge: "badge-neutral" };
       const isEmergencyUnpaid = s.skipPaymentGate && s.status === "waiting_for_payment";
+      const visit = allMyVisits.find(v => v.id === s.visitId);
+      const orderableDepts = allDepartments.filter(d =>
+        d.active !== false && ORDERABLE_TYPES.includes(d.type) && d.id !== consultDept?.id
+      );
 
       let actions = "";
       if (s.status === "waiting_for_payment" && s.skipPaymentGate) {
@@ -188,6 +212,7 @@
             <div>
               <div class="sr-name">${s.patientName} <span class="pid">${s.patientMRN || ""}</span></div>
               <div class="sr-price">${s.serviceName} — ${Number(s.finalPrice || s.price || 0).toLocaleString()} د.ع • ${fmtTime(s.createdAt)}</div>
+              ${s.isInsuredService ? `<div class="sr-price" style="margin-top:2px;">🩺 تأمين ${s.insuranceCoveragePercent}% — غطّى ${Number(s.insuranceCoveredAmount || 0).toLocaleString()} د.ع، والباقي على المريض</div>` : ""}
               ${s.result ? `<div class="sr-price" style="margin-top:4px;"><strong>التشخيص/النتيجة:</strong> ${s.result}</div>` : ""}
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
@@ -200,6 +225,22 @@
             <div class="result-box">
               <textarea class="input-field" placeholder="اكتب التشخيص أو النتيجة..."></textarea>
               <button class="btn btn-primary btn-sm" data-action="submit-result" data-id="${s.id}">حفظ</button>
+            </div>
+          </div>
+          <div class="order-entry-wrap">
+            <button type="button" class="btn btn-outline btn-sm" data-action="toggle-order" data-visit-id="${s.visitId}">🧾 طلب خدمة إضافية لهذا المريض</button>
+            <div class="order-entry-panel" data-order-panel-for="${s.visitId}">
+              ${orderableDepts.length ? `
+                <label class="field-label">اختر قسماً واحداً أو أكثر:</label>
+                <div class="order-dept-checks">
+                  ${orderableDepts.map(d => `<label class="chip-check"><input type="checkbox" value="${d.id}" data-name="${d.name}"> ${d.name}</label>`).join("")}
+                </div>
+                ${visit?.isInsured ? `
+                  <label class="field-label">نسبة تغطية التأمين لهذي الخدمات (%) *</label>
+                  <input type="number" class="input-field order-coverage-input" min="0" max="100" step="5" placeholder="مثال: 75">
+                ` : ""}
+                <button type="button" class="btn btn-primary btn-sm" data-action="submit-order" data-visit-id="${s.visitId}">إرسال الطلب</button>
+              ` : `<div class="sr-price">لا توجد أقسام أخرى متاحة للطلب حالياً</div>`}
             </div>
           </div>
         </div>`;
@@ -266,6 +307,51 @@
         }
       });
     });
+
+    container.querySelectorAll('[data-action="toggle-order"]').forEach(btn => {
+      btn.addEventListener("click", () => {
+        const panel = document.querySelector(`[data-order-panel-for="${btn.dataset.visitId}"]`);
+        if (panel) panel.classList.toggle("show");
+      });
+    });
+
+    container.querySelectorAll('[data-action="submit-order"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const visitId = btn.dataset.visitId;
+        const panel = document.querySelector(`[data-order-panel-for="${visitId}"]`);
+        const checked = Array.from(panel.querySelectorAll(".order-dept-checks input:checked"));
+        if (!checked.length) { showToast("اختر قسماً واحداً على الأقل", true); return; }
+
+        const visit = allMyVisits.find(v => v.id === visitId);
+        let coveragePercent = null;
+        if (visit?.isInsured) {
+          const coverageInput = panel.querySelector(".order-coverage-input");
+          const val = coverageInput ? coverageInput.value : "";
+          if (val === "" || Number(val) < 0 || Number(val) > 100) {
+            showToast("اكتب نسبة تغطية التأمين (0-100)", true);
+            return;
+          }
+          coveragePercent = Number(val);
+        }
+
+        btn.disabled = true; btn.textContent = "جارِ الإرسال...";
+        let allOk = true;
+        for (const cb of checked) {
+          const referral = { departmentId: cb.value, departmentName: cb.dataset.name };
+          if (coveragePercent !== null) referral.insuranceCoveragePercent = coveragePercent;
+          const result = await addReferral(visitId, referral, currentActor);
+          if (!result.success) { allOk = false; showToast(result.message, true); }
+        }
+        if (allOk) {
+          showToast("تم إرسال الطلب للأقسام المختارة ✓");
+          panel.classList.remove("show");
+          panel.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = false);
+          const coverageInput = panel.querySelector(".order-coverage-input");
+          if (coverageInput) coverageInput.value = "";
+        }
+        btn.disabled = false; btn.textContent = "إرسال الطلب";
+      });
+    });
   }
 
   document.querySelectorAll(".filter-tab").forEach(tab => {
@@ -290,6 +376,7 @@
     }
 
     const departments = await getDepartments();
+    allDepartments = departments;
     consultDept = departments.find(d => d.requiresDoctorAssignment === true);
 
     if (!consultDept) {
@@ -303,7 +390,11 @@
 
     catalog = await getCatalogByDepartment(consultDept.id);
 
-    subscribeConsultantReferrals(currentActor.uid, (visits) => renderReferrals(visits));
+    subscribeConsultantReferrals(currentActor.uid, (visits) => {
+      allMyVisits = visits;
+      renderReferrals(visits);
+      render(); // نعيد الرسم لأن بيانات التأمين بالزيارة قد تكون تحدّثت
+    });
 
     subscribeConsultantServices(currentActor.uid, (services) => {
       allServices = services;
