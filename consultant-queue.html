@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>طابور مرضاي — نظام إدارة المستشفى</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .filter-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .filter-tab { padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; background: var(--color-surface); border: 1.5px solid var(--color-border); color: var(--color-text-muted); }
+  .filter-tab.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+
+  .service-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; margin-bottom: 12px; }
+  .service-row.emergency { border: 1.5px solid var(--color-accent); background: #FFF8EC; }
+  .service-row .sr-name { font-weight: 700; font-size: 14.5px; }
+  .service-row .sr-price { font-size: 12.5px; color: var(--color-text-muted); }
+
+  .result-box { display: flex; gap: 8px; margin-top: 8px; }
+  .result-box textarea { flex: 1; min-height: 40px; resize: vertical; }
+
+  .referral-card { padding: 16px 20px; margin-bottom: 12px; border: 1.5px dashed var(--color-accent); }
+  .referral-card .rc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .catalog-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+  .catalog-chip { padding: 8px 14px; border-radius: 18px; border: 1.5px solid var(--color-border); font-size: 12.5px; font-weight: 700; background: var(--color-surface); cursor: pointer; }
+  .catalog-chip:hover { border-color: var(--color-primary); color: var(--color-primary); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar-mount"></aside>
+
+  <div class="main-content">
+    <div class="pulse-bar"></div>
+    <header class="topbar">
+      <h2 class="font-display" id="page-title">طابور مرضاي</h2>
+      <span class="badge badge-neutral" id="pending-count">0 طلب بالانتظار</span>
+    </header>
+
+    <main class="page-body">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-status="all">الكل</button>
+        <button class="filter-tab" data-status="waiting_for_payment">بانتظار الدفع</button>
+        <button class="filter-tab" data-status="in_progress">قيد التنفيذ</button>
+        <button class="filter-tab" data-status="completed">مكتملة</button>
+        <button class="filter-tab" data-status="delivered">تم التسليم</button>
+      </div>
+
+      <div id="referrals-section" style="margin-bottom:24px;">
+        <h3 style="font-size:14.5px; margin-bottom:12px;">🆕 مرضى جدد محوّلين إليّ</h3>
+        <div id="referrals-container"></div>
+      </div>
+
+      <h3 style="font-size:14.5px; margin-bottom:12px;">مرضاي — الحالات الجارية والمكتملة</h3>
+      <div id="services-container"><div class="card"><div class="empty-state">جارِ التحميل...</div></div></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireAuth } from "./assets/js/auth.js";
+  import { renderSidebar } from "./assets/js/sidebar.js";
+  import { SERVICE_STATUS, subscribeConsultantServices, addService, updateServiceStatus } from "./assets/js/api/services.js";
+  import { getDepartments, getCatalogByDepartment } from "./assets/js/api/referenceData.js";
+  import { subscribeConsultantReferrals, markReferralReceived } from "./assets/js/api/visits.js";
+  import { requestApproval } from "./assets/js/api/approvals.js";
+
+  let currentActor = null;
+  let currentProfile = null;
+  let consultDept = null; // القسم اللي فيه requiresDoctorAssignment === true
+  let catalog = [];
+  let allServices = [];
+  let activeFilter = "all";
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isError ? " error" : "");
+    setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString("ar-IQ", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+  }
+
+  function renderReferrals(visits) {
+    const container = document.getElementById("referrals-container");
+    if (!consultDept) { container.innerHTML = ""; return; }
+
+    const pending = visits.filter(v =>
+      (v.referrals || []).some(r =>
+        r.departmentId === consultDept.id && r.assignedDoctorId === currentActor.uid && r.status === "pending"
+      )
+    );
+
+    if (!pending.length) {
+      container.innerHTML = `<div class="card"><div class="empty-state" style="padding:24px;">لا يوجد مرضى جدد محوّلين إليك حالياً</div></div>`;
+      return;
+    }
+
+    container.innerHTML = pending.map(v => `
+      <div class="card referral-card" data-visit-id="${v.id}">
+        <div class="rc-top">
+          <div><strong>${v.patientName}</strong> <span class="pid">${v.patientMRN || ""}</span></div>
+          <span class="badge badge-neutral">${v.priority === "critical" ? "🔴 حرج" : v.priority === "urgent" ? "🟠 مستعجل" : "عادي"}</span>
+        </div>
+        ${v.notes ? `<div class="sr-price" style="margin-bottom:10px;">${v.notes}</div>` : ""}
+        <label class="field-label">اختر نوع الكشفية من الكتالوج:</label>
+        <div class="catalog-picker">
+          ${catalog.length
+            ? catalog.map(c => `<button type="button" class="catalog-chip" data-catalog-id="${c.id}" data-visit-id="${v.id}">${c.name} — ${Number(c.defaultPrice).toLocaleString()} د.ع</button>`).join("")
+            : `<span class="sr-price">لا توجد خدمات بكتالوج الاستشارية بعد — أضفها من لوحة الأدمن أولاً</span>`}
+        </div>
+      </div>
+    `).join("");
+
+    container.querySelectorAll(".catalog-chip").forEach(chip => {
+      chip.addEventListener("click", async () => {
+        const visit = pending.find(v => v.id === chip.dataset.visitId);
+        const cat = catalog.find(c => c.id === chip.dataset.catalogId);
+        if (!visit || !cat) return;
+        chip.disabled = true;
+        const result = await addService({
+          visitId: visit.id,
+          patientId: visit.patientId,
+          patientName: visit.patientName,
+          patientMRN: visit.patientMRN,
+          departmentId: consultDept.id,
+          catalogServiceId: cat.id,
+          serviceName: cat.name,
+          price: cat.defaultPrice,
+          skipPaymentGate: consultDept.paymentModel === "deferred_tab",
+          assignedDoctorId: currentActor.uid,
+          assignedDoctorName: currentActor.name
+        }, currentActor);
+
+        if (result.success) {
+          await markReferralReceived(visit.id, consultDept.id, currentActor.uid);
+          showToast("تمت إضافة المريض لقائمتك ✓");
+        } else {
+          showToast(result.message, true);
+          chip.disabled = false;
+        }
+      });
+    });
+  }
+
+  function render() {
+    const list = activeFilter === "all" ? allServices : allServices.filter(s => s.status === activeFilter);
+    const container = document.getElementById("services-container");
+
+    document.getElementById("pending-count").textContent =
+      allServices.filter(s => ["waiting_for_payment", "paid", "waiting"].includes(s.status)).length + " طلب بالانتظار";
+
+    if (!list.length) {
+      container.innerHTML = `<div class="card"><div class="empty-state"><div class="e-icon">📋</div>لا توجد حالات بهذا التصنيف</div></div>`;
+      return;
+    }
+
+    container.innerHTML = list.map(s => {
+      const st = SERVICE_STATUS[s.status] || { label: s.status, badge: "badge-neutral" };
+      const isEmergencyUnpaid = s.skipPaymentGate && s.status === "waiting_for_payment";
+
+      let actions = "";
+      if (s.status === "waiting_for_payment" && s.skipPaymentGate) {
+        actions = `<button class="btn btn-outline btn-sm" data-action="start" data-id="${s.id}">بدء الفحص (طارئ)</button>`;
+      } else if (s.status === "paid" || s.status === "waiting") {
+        actions = `<button class="btn btn-outline btn-sm" data-action="start" data-id="${s.id}">بدء الفحص</button>`;
+      } else if (s.status === "in_progress") {
+        actions = `<button class="btn btn-primary btn-sm" data-action="complete" data-id="${s.id}">إكمال مع التشخيص</button>`;
+      } else if (s.status === "completed") {
+        actions = `<button class="btn btn-primary btn-sm" data-action="deliver" data-id="${s.id}">تأكيد الانتهاء</button>`;
+      }
+      if (s.status === "waiting_for_payment" && !s.skipPaymentGate) {
+        actions += ` <button class="btn btn-danger btn-sm" data-action="cancel-direct" data-id="${s.id}">إلغاء</button>`;
+      } else if (["paid", "waiting", "in_progress", "completed"].includes(s.status)) {
+        actions += ` <button class="btn btn-outline btn-sm" data-action="request-cancel" data-id="${s.id}" data-price="${s.finalPrice || s.price || 0}">طلب إلغاء (يتطلب موافقة)</button>`;
+      }
+
+      return `
+        <div class="card service-row ${isEmergencyUnpaid ? "emergency" : ""}" style="flex-direction:column; align-items:stretch;" data-id="${s.id}">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div class="sr-name">${s.patientName} <span class="pid">${s.patientMRN || ""}</span></div>
+              <div class="sr-price">${s.serviceName} — ${Number(s.finalPrice || s.price || 0).toLocaleString()} د.ع • ${fmtTime(s.createdAt)}</div>
+              ${s.result ? `<div class="sr-price" style="margin-top:4px;"><strong>التشخيص/النتيجة:</strong> ${s.result}</div>` : ""}
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              ${isEmergencyUnpaid ? `<span class="badge badge-danger">🚨 غير مسدد</span>` : ""}
+              <span class="badge ${st.badge}">${st.label}</span>
+              ${actions}
+            </div>
+          </div>
+          <div class="result-input-slot" style="display:none;">
+            <div class="result-box">
+              <textarea class="input-field" placeholder="اكتب التشخيص أو النتيجة..."></textarea>
+              <button class="btn btn-primary btn-sm" data-action="submit-result" data-id="${s.id}">حفظ</button>
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+
+    bindActions(container);
+  }
+
+  function bindActions(container) {
+    container.querySelectorAll('[data-action="start"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await updateServiceStatus(btn.dataset.id, "in_progress", {}, currentActor);
+        showToast("تم بدء الفحص");
+      });
+    });
+    container.querySelectorAll('[data-action="complete"]').forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = btn.closest(".service-row");
+        card.querySelector(".result-input-slot").style.display = "block";
+        btn.style.display = "none";
+      });
+    });
+    container.querySelectorAll('[data-action="submit-result"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".service-row");
+        const resultText = card.querySelector("textarea").value.trim();
+        btn.disabled = true;
+        await updateServiceStatus(btn.dataset.id, "completed", { result: resultText }, currentActor);
+        showToast("تم إكمال الحالة ✓");
+      });
+    });
+    container.querySelectorAll('[data-action="deliver"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await updateServiceStatus(btn.dataset.id, "delivered", {}, currentActor);
+        showToast("تم تأكيد الانتهاء ✓");
+      });
+    });
+    container.querySelectorAll('[data-action="cancel-direct"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("تأكيد إلغاء هذا الطلب؟ (لم يُدفع بعد، لا يحتاج موافقة)")) return;
+        btn.disabled = true;
+        await updateServiceStatus(btn.dataset.id, "cancelled", {}, currentActor);
+        showToast("تم إلغاء الطلب");
+      });
+    });
+    container.querySelectorAll('[data-action="request-cancel"]').forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const reason = prompt("سبب طلب الإلغاء (إلزامي، سيُرسل للمدير المالي للاعتماد):");
+        if (!reason || !reason.trim()) return;
+        btn.disabled = true;
+        const result = await requestApproval({
+          type: "cancel_after_payment",
+          relatedServiceId: btn.dataset.id,
+          reason: reason.trim(),
+          amount: btn.dataset.price
+        }, currentActor);
+        if (result.success) {
+          showToast("تم إرسال طلب الإلغاء للمدير المالي ✓");
+        } else {
+          showToast(result.message, true);
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  document.querySelectorAll(".filter-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      activeFilter = tab.dataset.status;
+      render();
+    });
+  });
+
+  requireAuth(async ({ user, profile }) => {
+    currentActor = { uid: user.uid, name: profile.name };
+    currentProfile = profile;
+    renderSidebar("consultant_queue", profile);
+
+    if (!profile.isConsultant) {
+      document.getElementById("services-container").innerHTML =
+        `<div class="card"><div class="empty-state">هذه الصفحة مخصصة لحسابات الأطباء الاستشاريين فقط</div></div>`;
+      document.getElementById("referrals-container").innerHTML = "";
+      return;
+    }
+
+    const departments = await getDepartments();
+    consultDept = departments.find(d => d.requiresDoctorAssignment === true);
+
+    if (!consultDept) {
+      document.getElementById("services-container").innerHTML =
+        `<div class="card"><div class="empty-state">لا يوجد قسم استشارية مفعّل بعد — راجع لوحة الأدمن</div></div>`;
+      return;
+    }
+
+    document.getElementById("page-title").textContent = "طابور مرضاي — " + (profile.specialty || "");
+    document.title = "طابور مرضاي — نظام إدارة المستشفى";
+
+    catalog = await getCatalogByDepartment(consultDept.id);
+
+    subscribeConsultantReferrals(currentActor.uid, (visits) => renderReferrals(visits));
+
+    subscribeConsultantServices(currentActor.uid, (services) => {
+      allServices = services;
+      render();
+    });
+  });
+</script>
+</body>
+</html>
