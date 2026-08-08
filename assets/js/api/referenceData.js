@@ -71,10 +71,11 @@ export async function getDepartments() {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-export async function addDepartment({ name, type, paymentModel }) {
+export async function addDepartment({ name, type, paymentModel, requiresDoctorAssignment }) {
   return addDoc(collection(db, "departments"), {
     name, type: type || "clinical",
     paymentModel: paymentModel || "per_service",
+    requiresDoctorAssignment: !!requiresDoctorAssignment,
     active: true
   });
 }
